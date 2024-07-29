@@ -1,18 +1,10 @@
-#include "XrdPurgeLotMan.hh" // Include the header file for XrdPurgeLotMan
+#include "XrdPurgeLotMan.hh"
+
 #include <lotman/lotman.h>
 #include <nlohmann/json.hpp>
 
-#include "XrdPfc/XrdPfcPurgePin.hh"
-#include <XrdPfc/XrdPfcDirStateSnapshot.hh>
-
-#include "XrdOuc/XrdOucEnv.hh"
-#include "XrdOuc/XrdOucUtils.hh"
-#include "XrdOuc/XrdOucStream.hh"
-
-#include <iostream>
 #include <string>
 #include <sstream>
-
 #include <filesystem>
 
 #define GB2B 1024ll * 1024ll * 1024ll
