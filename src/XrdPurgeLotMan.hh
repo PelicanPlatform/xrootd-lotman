@@ -4,9 +4,8 @@
 #include <XrdPfc/XrdPfcPurgePin.hh>
 #include <XrdPfc/XrdPfcDirStateSnapshot.hh>
 #include <XrdPfc/XrdPfc.hh>
-#include <unordered_set>
 
-#include <iostream>
+#include <unordered_set>
 
 namespace XrdPfc
 {
