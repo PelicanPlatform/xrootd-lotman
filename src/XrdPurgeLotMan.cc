@@ -462,7 +462,7 @@ long long XrdPurgeLotMan::GetBytesToRecover(const DataFsPurgeshot &purge_shot)
 
     for (const auto & [dir, stats] : m_purge_dirs) {
         DirInfo update;
-        update.path = dir + "/"; // XRootD will seg fault if the path doesn't end in a slash
+        update.path = dir;
         update.nBytesToRecover = stats->dir_b_to_purge;
 
         m_list.push_back(update);
