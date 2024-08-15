@@ -5,7 +5,91 @@
 #include <XrdPfc/XrdPfcDirStateSnapshot.hh>
 #include <XrdPfc/XrdPfc.hh>
 
+#include <nlohmann/json.hpp>
+#include <filesystem>
+#include <map>
 #include <unordered_set>
+
+#define GB2B 1024ll * 1024ll * 1024ll
+#define BLKSZ 512ll
+
+namespace fs = std::filesystem;
+using json = nlohmann::json;
+
+namespace {
+// Function to convert char*** to std::string for logging
+std::string convertListToString(char** stringArr) {
+    if (stringArr == nullptr) {
+        return "";
+    }
+    std::string result;
+    for (int i = 0; stringArr[i] != nullptr; ++i) {
+        if (i > 0) {
+            result += ", ";
+        }
+        result += stringArr[i];
+    }
+    return result;
+}
+
+struct DirNode {
+    std::filesystem::path path;
+    std::vector<DirNode*> subDirs; // Pointers to subdirectories
+};
+
+// Given a DirNode, convert it to the JSON object used by LotMan for updating lot usage
+json dirNodeToJson(const DirNode* node, const XrdPfc::DataFsPurgeshot &purge_shot) {
+    nlohmann::json dirJson;
+    std::filesystem::path dirPath(node->path);
+    dirJson["path"] = dirPath.filename().string();
+
+    const auto usage = purge_shot.find_dir_usage_for_dir_path(node->path);
+    if (usage) {
+        dirJson["size_GB"] = static_cast<double>(usage->m_StBlocks) * BLKSZ / GB2B;
+    } else {
+        dirJson["size_GB"] = 0.0;
+    }
+
+    if (!node->subDirs.empty()) {
+        dirJson["includes_subdirs"] = true;
+        for (const auto* subDir : node->subDirs) {
+            dirJson["subdirs"].push_back(dirNodeToJson(subDir, purge_shot));
+        }
+    } else {
+        dirJson["includes_subdirs"] = false;
+    }
+
+    return dirJson;
+}
+
+// Loop over the purge_shot's directory vector, and reconstruct the paths for
+// LotMan. Doing this allows us to build a usage update JSON, which tells LotMan
+// about our current understanding of cache's disk usage.
+json reconstructPathsAndBuildJson(const XrdPfc::DataFsPurgeshot &purge_shot) {
+    std::unordered_map<int, DirNode> indexToDirNode;
+    std::vector<DirNode*> rootDirs;
+
+    for (int i = 0; i < purge_shot.m_dir_vec.size(); ++i) {
+        const auto& dir_entry = purge_shot.m_dir_vec[i];
+        DirNode& dirNode = indexToDirNode[i];
+        dirNode.path = dir_entry.m_dir_name;
+        if (dir_entry.m_parent != -1) {
+            dirNode.path = std::filesystem::path("/") / indexToDirNode[dir_entry.m_parent].path / dirNode.path;
+            indexToDirNode[dir_entry.m_parent].subDirs.push_back(&dirNode);
+            if (dir_entry.m_parent == 0) {
+                rootDirs.push_back(&dirNode);
+            }
+        }
+    }
+
+    nlohmann::json allDirsJson = nlohmann::json::array();
+    for (const auto* rootDir : rootDirs) {
+        allDirsJson.push_back(dirNodeToJson(rootDir, purge_shot));
+    }
+
+    return allDirsJson;
+}
+} // End of anonymous namespace
 
 namespace XrdPfc
 {
@@ -33,34 +117,8 @@ struct PurgeDirCandidateStats {
     long long dir_b_remaining;
 };
 
-std::string getPolicyName(PurgePolicy policy) {
-    switch (policy) {
-        case PurgePolicy::PastDel:
-            return "LotsPastDel";
-        case PurgePolicy::PastExp:
-            return "LotsPastExp";
-        case PurgePolicy::PastOpp:
-            return "LotsPastOpp";
-        case PurgePolicy::PastDed:
-            return "LotsPastDed";
-        default:
-            return "UnknownPolicy";
-    }
-}
-
-PurgePolicy getPolicyFromName(std::string policy) {
-    if (policy == "del") {
-        return PurgePolicy::PastDel;
-    } else if (policy == "exp") {
-        return PurgePolicy::PastExp;
-    } else if (policy == "opp") {
-        return PurgePolicy::PastOpp;
-    } else if (policy == "ded") {
-        return PurgePolicy::PastDed;
-    } else {
-        return PurgePolicy::UnknownPolicy;
-    }
-}
+std::string getPolicyName(PurgePolicy policy);
+PurgePolicy getPolicyFromConfigName(const std::string& name);
 
 class XrdPurgeLotMan : public PurgePin
 {
@@ -104,11 +162,20 @@ public:
         std::vector<PurgePolicy> m_policy;
     };
 
-    static const std::map<PurgePolicy, void (XrdPurgeLotMan::*)(const DataFsPurgeshot&, long long&)> policyFunctionMap;
+    static const std::map<PurgePolicy, void (XrdPurgeLotMan::*)(const DataFsPurgeshot&, long long&)> &getPolicyFunctionMap() {
+        static const std::map<PurgePolicy, void (XrdPurgeLotMan::*)(const DataFsPurgeshot&, long long&)> policyFunctionMap = {
+            {PurgePolicy::PastDel, &XrdPurgeLotMan::lotsPastDelPolicy},
+            {PurgePolicy::PastExp, &XrdPurgeLotMan::lotsPastExpPolicy},
+            {PurgePolicy::PastOpp, &XrdPurgeLotMan::lotsPastOppPolicy},
+            {PurgePolicy::PastDed, &XrdPurgeLotMan::lotsPastDedPolicy}
+        };
+        return policyFunctionMap;
+    }
+
     void applyPolicies(const DataFsPurgeshot &purge_shot, long long &bytesRemaining) {
         for (const auto &policy : m_lotman_conf.GetPolicy()) {
-            auto it = policyFunctionMap.find(policy);
-            if (it != policyFunctionMap.end()) {
+            auto it = getPolicyFunctionMap().find(policy);
+            if (it != getPolicyFunctionMap().end()) {
                 (this->*(it->second))(purge_shot, bytesRemaining);
             }
         }
@@ -140,17 +207,8 @@ private:
 
     long long getTotalUsageB();
     std::map<std::string, long long> lotPerDirUsageB(const std::string &lot, const DataFsPurgeshot &purge_shot);
-
-
 };
 
-// Initialize the policyFunctionMap
-const std::map<PurgePolicy, void (XrdPurgeLotMan::*)(const DataFsPurgeshot&, long long&)> XrdPurgeLotMan::policyFunctionMap = {
-    {PurgePolicy::PastDel, &XrdPurgeLotMan::lotsPastDelPolicy},
-    {PurgePolicy::PastExp, &XrdPurgeLotMan::lotsPastExpPolicy},
-    {PurgePolicy::PastOpp, &XrdPurgeLotMan::lotsPastOppPolicy},
-    {PurgePolicy::PastDed, &XrdPurgeLotMan::lotsPastDedPolicy}
-};
 }
 
 #endif // __XRDPURGELOTMAN_HH__
