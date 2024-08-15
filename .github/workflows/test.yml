@@ -40,13 +40,13 @@ jobs:
         # nlohmann/json
         git clone https://github.com/nlohmann/json.git && \
         cd json && mkdir build && \
-        cd build && cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+        cd build && cmake -DCMAKE_INSTALL_PREFIX=$HOME/install .. && \
         make -j`nproc` install
 
         # json schema validator
         git clone https://github.com/pboettch/json-schema-validator.git && \
         cd json-schema-validator && mkdir build && \
-        cd build && cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
+        cd build && cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=$HOME/install .. && \
         make -j`nproc` install
 
         # Lotman
@@ -55,7 +55,7 @@ jobs:
         git checkout v0.0.3 && \
         mkdir build && cd build && \
         # LotMan CMakeLists.txt needs to be updated to use -DLIB_INSTALL_DIR. Issue #6
-        cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
+        cmake -DCMAKE_INSTALL_PREFIX=$HOME/install .. && \
         make -j`nproc` install
 
         #####################################
@@ -65,7 +65,7 @@ jobs:
         cd xrootd && \
         git checkout purge-main-rb1 && \
         mkdir build && cd build && \
-        cmake -DCMAKE_BUILD_TYPE=Debug .. && \
+        cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$HOME/install .. && \
         make -j`nproc` install
 
 
