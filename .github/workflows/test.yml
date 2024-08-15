@@ -34,41 +34,43 @@ jobs:
 
         sudo apt update && sudo apt-get install -y cmake libgtest-dev
 
-        # Update LD_LIBRARY_PATH to correctly scope the installed dependencies
-        export LD_LIBRARY_PATH=/home/runner/install/lib:$LD_LIBRARY_PATH
-
         #################################
         # Install Lotman & dependencies #
         #################################
         # nlohmann/json
+        echo "Installing nlohmann/json"
         git clone https://github.com/nlohmann/json.git && \
         cd json && mkdir build && \
         cd build && cmake -DCMAKE_INSTALL_PREFIX=$HOME/install .. && \
         make -j`nproc` install
 
         # json schema validator
+        echo "Installing json-schema-validator"
         git clone https://github.com/pboettch/json-schema-validator.git && \
         cd json-schema-validator && mkdir build && \
         cd build && cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=$HOME/install .. && \
         make -j`nproc` install
+        # Update LD_LIBRARY_PATH to correctly scope the installed dependencies
+        export LD_LIBRARY_PATH=$HOME/install/lib:$LD_LIBRARY_PATH
 
         # Lotman
+        echo "Installing Lotman"
         git clone https://github.com/PelicanPlatform/lotman.git && \
         cd lotman && \
         git checkout v0.0.3 && \
         mkdir build && cd build && \
-        # LotMan CMakeLists.txt needs to be updated to use -DLIB_INSTALL_DIR. Issue #6
-        cmake -DCMAKE_INSTALL_PREFIX=$HOME/install -DCMAKE_PREFIX_PATH=$HOME/install .. && \
+        cmake -DCMAKE_INSTALL_PREFIX=$HOME/install -DCMAKE_PREFIX_PATH=$HOME/install -DCMAKE_EXE_LINKER_FLAGS="-L$HOME/install/lib" .. && \
         make -j`nproc` install
 
         #####################################
         # Install Custom XRootD (temporary) #
         #####################################
+        echo "Installing Alja's XRootD"
         git clone https://github.com/alja/xrootd.git && \
         cd xrootd && \
         git checkout purge-main-rb1 && \
         mkdir build && cd build && \
-        cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$HOME/install -DCMAKE_PREFIX_PATH=$HOME/install .. && \
+        cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$HOME/install -DCMAKE_PREFIX_PATH=$HOME/install -DCMAKE_CXX_FLAGS="-I$HOME/install/include" .. && \
         make -j`nproc` install
 
 
