@@ -50,8 +50,7 @@ jobs:
         cd json-schema-validator && mkdir build && \
         cd build && cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=$HOME/install .. && \
         make -j`nproc` install
-        # Update LD_LIBRARY_PATH to correctly scope the installed dependencies
-        export LD_LIBRARY_PATH=$HOME/install/lib:$LD_LIBRARY_PATH
+
 
         # Lotman
         echo "Installing Lotman"
@@ -59,7 +58,10 @@ jobs:
         cd lotman && \
         git checkout v0.0.3 && \
         mkdir build && cd build && \
-        cmake -DCMAKE_INSTALL_PREFIX=$HOME/install -DCMAKE_PREFIX_PATH=$HOME/install -DCMAKE_LIBRARY_PATH=$HOME/install/lib -DCMAKE_INCLUDE_PATH=$HOME/install/include .. && \
+        cmake -DCMAKE_INSTALL_PREFIX=$HOME/install \
+            -DCMAKE_PREFIX_PATH=$HOME/install \
+            -DCMAKE_CXX_FLAGS="-I$HOME/install/include -L$HOME/install/lib -L$HOME/install/lib64" \
+            .. && \
         make -j`nproc` install
 
         #####################################
