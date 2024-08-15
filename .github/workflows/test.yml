@@ -59,7 +59,7 @@ jobs:
         cd lotman && \
         git checkout v0.0.3 && \
         mkdir build && cd build && \
-        cmake -DCMAKE_INSTALL_PREFIX=$HOME/install -DCMAKE_PREFIX_PATH=$HOME/install -DCMAKE_EXE_LINKER_FLAGS="-L$HOME/install/lib" .. && \
+        cmake -DCMAKE_INSTALL_PREFIX=$HOME/install -DCMAKE_PREFIX_PATH=$HOME/install -DCMAKE_LIBRARY_PATH=$HOME/install/lib -DCMAKE_INCLUDE_PATH=$HOME/install/include .. && \
         make -j`nproc` install
 
         #####################################
