@@ -1,4 +1,4 @@
-ame: Test
+Name: Test
 
 on:
   workflow_dispatch:
