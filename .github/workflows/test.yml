@@ -32,7 +32,7 @@ jobs:
     - name: install deps
       run: |
 
-        sudo apt update && sudo apt-get install -y cmake libgtest-dev xrootd-server
+        sudo apt update && sudo apt-get install -y cmake libgtest-dev
 
         #################################
         # Install Lotman & dependencies #
