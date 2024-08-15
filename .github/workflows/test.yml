@@ -1,4 +1,4 @@
-Name: Test
+name: Test
 
 on:
   workflow_dispatch:
@@ -34,38 +34,48 @@ jobs:
 
         sudo apt update && sudo apt-get install -y cmake libgtest-dev
 
+        START_DIR=$(pwd)
         #################################
         # Install Lotman & dependencies #
         #################################
         # nlohmann/json
+        echo "Installing nlohmann/json"
         git clone https://github.com/nlohmann/json.git && \
         cd json && mkdir build && \
-        cd build && cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+        cd build && cmake -DCMAKE_INSTALL_PREFIX=$HOME/install .. && \
         make -j`nproc` install
 
         # json schema validator
+        cd $START_DIR
+        echo "Installing json-schema-validator"
         git clone https://github.com/pboettch/json-schema-validator.git && \
         cd json-schema-validator && mkdir build && \
-        cd build && cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
+        cd build && cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=$HOME/install .. && \
         make -j`nproc` install
 
         # Lotman
+        cd $START_DIR
+        echo "Installing Lotman"
         git clone https://github.com/PelicanPlatform/lotman.git && \
         cd lotman && \
         git checkout v0.0.3 && \
         mkdir build && cd build && \
-        # LotMan CMakeLists.txt needs to be updated to use -DLIB_INSTALL_DIR. Issue #6
-        cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
+        cmake -DCMAKE_INSTALL_PREFIX=$HOME/install \
+            -DCMAKE_PREFIX_PATH=$HOME/install \
+            -DCMAKE_CXX_FLAGS="-I$HOME/install/include -L$HOME/install/lib -L$HOME/install/lib64" \
+            .. && \
         make -j`nproc` install
 
         #####################################
         # Install Custom XRootD (temporary) #
         #####################################
+        cd $START_DIR
+        echo "Installing Alja's XRootD"
         git clone https://github.com/alja/xrootd.git && \
         cd xrootd && \
         git checkout purge-main-rb1 && \
         mkdir build && cd build && \
-        cmake -DCMAKE_BUILD_TYPE=Debug .. && \
+        cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$HOME/install -DCMAKE_PREFIX_PATH=$HOME/install -DCMAKE_CXX_FLAGS="-I$HOME/install/include" .. && \
         make -j`nproc` install
 
 
@@ -74,22 +84,36 @@ jobs:
       # We'll use this as our working directory for all subsequent commands
       run: cmake -E make_directory ${{runner.workspace}}/build
 
-    - name: Configure CMake
-      # Use a bash shell so we can use the same syntax for environment variable
-      # access regardless of the host operating system
-      shell: bash
-      working-directory: ${{runner.workspace}}/build      
-      run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DXROOTD_PLUGINS_BUILD_UNITTESTS=yes -DXROOTD_PLUGINS_EXTERNAL_GTEST=${{ matrix.external-gtest }}
-
+    # - name: Configure CMake
+    #   # Use a bash shell so we can use the same syntax for environment variable
+    #   # access regardless of the host operating system
+    #   shell: bash
+    #   working-directory: ${{runner.workspace}}/build      
+    #   run: |
+    #     export LD_LIBRARY_PATH="$HOME/install/lib:$HOME/install/lib64:$LD_LIBRARY_PATH"
+    #     export CMAKE_PREFIX_PATH="$HOME/install:$CMAKE_PREFIX_PATH"
+    #     export CMAKE_LIBRARY_PATH="$HOME/install/lib64:$CMAKE_LIBRARY_PATH"
+    #     export CMAKE_INCLUDE_PATH="$HOME/install/include:$CMAKE_INCLUDE_PATH"
+    #     cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} -DXROOTD_PLUGINS_BUILD_UNITTESTS=ON -DCMAKE_CXX_FLAGS="-I$HOME/install/include -L$HOME/install/lib -L$HOME/install/lib64" -DCMAKE_INSTALL_RPATH="$HOME/install/lib:$HOME/install/lib64" -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON -DXROOTD_PLUGINS_EXTERNAL_GTEST=${{ matrix.external-gtest }}
+        
     - name: Build
       working-directory: ${{runner.workspace}}/build
       shell: bash
       # Execute the build.  You can specify a specific target with "--target <NAME>"
-      run: cmake --build . --config $BUILD_TYPE
+      run: |
+        export LD_LIBRARY_PATH="$HOME/install/lib:$HOME/install/lib64:$LD_LIBRARY_PATH"
+        export CMAKE_PREFIX_PATH="$HOME/install:$CMAKE_PREFIX_PATH"
+        export CMAKE_LIBRARY_PATH="$HOME/install/lib64:$CMAKE_LIBRARY_PATH"
+        export CMAKE_INCLUDE_PATH="$HOME/install/include:$CMAKE_INCLUDE_PATH"
+        cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} -DXROOTD_PLUGINS_BUILD_UNITTESTS=ON -DCMAKE_CXX_FLAGS="-I$HOME/install/include -L$HOME/install/lib -L$HOME/install/lib64" -DCMAKE_INSTALL_RPATH="$HOME/install/lib:$HOME/install/lib64" -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON -DXROOTD_PLUGINS_EXTERNAL_GTEST=${{ matrix.external-gtest }}
+        
+        cmake --build . --config $BUILD_TYPE
 
     - name: Unit Tests
       working-directory: ${{runner.workspace}}/build
       shell: bash
       # Execute tests defined by the CMake configuration.
       # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
-      run: ctest -C $BUILD_TYPE --verbose
+      run: |
+        export LD_LIBRARY_PATH="$HOME/install/lib:$HOME/install/lib64:$LD_LIBRARY_PATH"
+        ctest -C $BUILD_TYPE --verbose
