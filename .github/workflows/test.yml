@@ -87,22 +87,23 @@ jobs:
       shell: bash
       working-directory: ${{runner.workspace}}/build      
       run: |
-        
         export LD_LIBRARY_PATH="$HOME/install/lib:$HOME/install/lib64:$LD_LIBRARY_PATH"
         export CMAKE_PREFIX_PATH="$HOME/install:$CMAKE_PREFIX_PATH"
         export CMAKE_LIBRARY_PATH="$HOME/install/lib64:$CMAKE_LIBRARY_PATH"
         export CMAKE_INCLUDE_PATH="$HOME/install/include:$CMAKE_INCLUDE_PATH"
-        cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} -DXROOTD_PLUGINS_BUILD_UNITTESTS=ON -DCMAKE_CXX_FLAGS="-I$HOME/install/include -L$HOME/install/lib -L$HOME/install/lib64" -DCMAKE_INSTALL_RPATH="$HOME/install/lib:$HOME/install/lib64" -DXROOTD_PLUGINS_EXTERNAL_GTEST=${{ matrix.external-gtest }}
+        cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} -DXROOTD_PLUGINS_BUILD_UNITTESTS=ON -DCMAKE_CXX_FLAGS="-I$HOME/install/include -L$HOME/install/lib -L$HOME/install/lib64" -DCMAKE_INSTALL_RPATH="$HOME/install/lib:$HOME/install/lib64" -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON -DXROOTD_PLUGINS_EXTERNAL_GTEST=${{ matrix.external-gtest }}
         
     - name: Build
       working-directory: ${{runner.workspace}}/build
       shell: bash
       # Execute the build.  You can specify a specific target with "--target <NAME>"
-      run: cmake --build . --config $BUILD_TYPE
+      run: cmake --build . --config ${{ matrix.build-type }}
 
     - name: Unit Tests
       working-directory: ${{runner.workspace}}/build
       shell: bash
       # Execute tests defined by the CMake configuration.
       # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
-      run: ctest -C $BUILD_TYPE --verbose
+      run: |
+        export LD_LIBRARY_PATH="$HOME/install/lib:$HOME/install/lib64:$LD_LIBRARY_PATH"
+        ctest -C ${{ matrix.build-type }} --verbose
