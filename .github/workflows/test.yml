@@ -32,7 +32,7 @@ jobs:
     - name: install deps
       run: |
 
-        sudo apt update && sudo apt-get install -y cmake libgtest-dev
+        sudo apt update && sudo apt-get install -y cmake libgtest-dev xrootd-server
 
         #################################
         # Install Lotman & dependencies #
@@ -87,6 +87,7 @@ jobs:
       shell: bash
       working-directory: ${{runner.workspace}}/build      
       run: |
+        
         export LD_LIBRARY_PATH="$HOME/install/lib:$HOME/install/lib64:$LD_LIBRARY_PATH"
         export CMAKE_PREFIX_PATH="$HOME/install:$CMAKE_PREFIX_PATH"
         cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DXROOTD_PLUGINS_BUILD_UNITTESTS=ON -DCMAKE_CXX_FLAGS="-I$HOME/install/include -L$HOME/install/lib -L$HOME/install/lib64" -DXROOTD_PLUGINS_EXTERNAL_GTEST=${{ matrix.external-gtest }}
