@@ -84,18 +84,6 @@ jobs:
       # We'll use this as our working directory for all subsequent commands
       run: cmake -E make_directory ${{runner.workspace}}/build
 
-    # - name: Configure CMake
-    #   # Use a bash shell so we can use the same syntax for environment variable
-    #   # access regardless of the host operating system
-    #   shell: bash
-    #   working-directory: ${{runner.workspace}}/build      
-    #   run: |
-    #     export LD_LIBRARY_PATH="$HOME/install/lib:$HOME/install/lib64:$LD_LIBRARY_PATH"
-    #     export CMAKE_PREFIX_PATH="$HOME/install:$CMAKE_PREFIX_PATH"
-    #     export CMAKE_LIBRARY_PATH="$HOME/install/lib64:$CMAKE_LIBRARY_PATH"
-    #     export CMAKE_INCLUDE_PATH="$HOME/install/include:$CMAKE_INCLUDE_PATH"
-    #     cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} -DXROOTD_PLUGINS_BUILD_UNITTESTS=ON -DCMAKE_CXX_FLAGS="-I$HOME/install/include -L$HOME/install/lib -L$HOME/install/lib64" -DCMAKE_INSTALL_RPATH="$HOME/install/lib:$HOME/install/lib64" -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON -DXROOTD_PLUGINS_EXTERNAL_GTEST=${{ matrix.external-gtest }}
-        
     - name: Build
       working-directory: ${{runner.workspace}}/build
       shell: bash
