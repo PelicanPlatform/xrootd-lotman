@@ -61,7 +61,6 @@ long long XrdPurgeLotMan::getTotalUsageB() {
 	if (rv != 0) {
 		log->Emsg("XrdPurgeLotMan", "getTotalUsageB",
 				  ("Error getting all lots: " + std::string(err)).c_str());
-		// CAREFUL WITH 0 RETURN. We'll never recover any space.
 		return 0;
 	}
 
@@ -90,10 +89,12 @@ long long XrdPurgeLotMan::getTotalUsageB() {
 			rv = lotman_get_lot_usage(usageQueryJSON.dump().c_str(), &output,
 									  &err);
 			if (rv != 0) {
+				std::unique_ptr<char, decltype(&free)> err_ptr(err, free);
 				continue;
 			}
 
-			json usageJSON = json::parse(output);
+			std::unique_ptr<char, decltype(&free)> output_ptr(output, free);
+			json usageJSON = json::parse(output_ptr.get());
 			double totalGB = usageJSON["total_GB"]["total"];
 			totalUsage += static_cast<long long>(totalGB * GB2B);
 		}
@@ -379,9 +380,6 @@ long long XrdPurgeLotMan::GetBytesToRecover(const DataFsPurgeshot &purge_shot) {
 	if (rv != 0) {
 		log->Emsg("XrdPurgeLotMan", "GetBytesToRecover",
 				  "Error getting lot home:", err);
-		// TODO: If we encounter an error and return 0, we'll never recover any
-		// space. Need to think about how to fall back to age-based purging when
-		// this is the case.
 		return 0;
 	}
 	auto lotUpdateJson = reconstructPathsAndBuildJson(purge_shot);
@@ -391,9 +389,6 @@ long long XrdPurgeLotMan::GetBytesToRecover(const DataFsPurgeshot &purge_shot) {
 	if (rv != 0) {
 		log->Emsg("XrdPurgeLotMan", "GetBytesToRecover",
 				  "Error updating lot usage by dir:", err);
-		// TODO: If we encounter an error and return 0, we'll never recover any
-		// space. Need to think about how to fall back to age-based purging when
-		// this is the case.
 		return 0;
 	}
 

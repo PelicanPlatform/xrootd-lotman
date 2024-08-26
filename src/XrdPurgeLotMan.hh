@@ -10,7 +10,7 @@
 #include <nlohmann/json.hpp>
 #include <unordered_set>
 
-#define GB2B 1024ll * 1024ll * 1024ll
+#define GB2B 1000ll * 1000ll * 1000ll
 #define BLKSZ 512ll
 
 namespace fs = std::filesystem;
@@ -177,7 +177,6 @@ class XrdPurgeLotMan : public PurgePin {
   protected:
 	std::string getLotHome() { return m_lotman_conf.GetLotHome(); }
 
-  private:
 	std::map<std::string, std::unique_ptr<PurgeDirCandidateStats>> m_purge_dirs;
 	LotManConfiguration m_lotman_conf;
 
