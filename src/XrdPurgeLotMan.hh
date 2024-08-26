@@ -10,7 +10,7 @@
 #include <nlohmann/json.hpp>
 #include <unordered_set>
 
-#define GB2B 1000ll * 1000ll * 1000ll
+#define GB2B (1000ll * 1000ll * 1000ll)
 #define BLKSZ 512ll
 
 namespace fs = std::filesystem;
@@ -48,7 +48,7 @@ json dirNodeToJson(const DirNode *node,
 	const auto usage = purge_shot.find_dir_usage_for_dir_path(node->path);
 	if (usage) {
 		dirJson["size_GB"] =
-			static_cast<double>(usage->m_StBlocks) * BLKSZ / GB2B;
+			(static_cast<double>(usage->m_StBlocks) * BLKSZ) / GB2B;
 	} else {
 		dirJson["size_GB"] = 0.0;
 	}
