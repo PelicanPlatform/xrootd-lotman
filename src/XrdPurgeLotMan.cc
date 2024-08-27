@@ -45,6 +45,18 @@ long long XrdPurgeLotMan::GetConfiguredHWM() { return conf.m_diskUsageHWM; }
 
 long long XrdPurgeLotMan::GetConfiguredLWM() { return conf.m_diskUsageLWM; }
 
+long long XrdPurgeLotMan::GetConfiguredFUsageBaseline() {
+	return conf.m_fileUsageBaseline;
+}
+
+long long XrdPurgeLotMan::GetConfiguredFUsageNominal() {
+	return conf.m_fileUsageNominal;
+}
+
+long long XrdPurgeLotMan::GetConfiguredFUsageMax() {
+	return conf.m_fileUsageMax;
+}
+
 struct XrdPurgeLotMan::LotDeleter {
 	void operator()(char **ptr) { lotman_free_string_list(ptr); }
 };
@@ -61,7 +73,6 @@ long long XrdPurgeLotMan::getTotalUsageB() {
 	if (rv != 0) {
 		log->Emsg("XrdPurgeLotMan", "getTotalUsageB",
 				  ("Error getting all lots: " + std::string(err)).c_str());
-		// CAREFUL WITH 0 RETURN. We'll never recover any space.
 		return 0;
 	}
 
@@ -90,10 +101,12 @@ long long XrdPurgeLotMan::getTotalUsageB() {
 			rv = lotman_get_lot_usage(usageQueryJSON.dump().c_str(), &output,
 									  &err);
 			if (rv != 0) {
+				std::unique_ptr<char, decltype(&free)> err_ptr(err, free);
 				continue;
 			}
 
-			json usageJSON = json::parse(output);
+			std::unique_ptr<char, decltype(&free)> output_ptr(output, free);
+			json usageJSON = json::parse(output_ptr.get());
 			double totalGB = usageJSON["total_GB"]["total"];
 			totalUsage += static_cast<long long>(totalGB * GB2B);
 		}
@@ -379,9 +392,6 @@ long long XrdPurgeLotMan::GetBytesToRecover(const DataFsPurgeshot &purge_shot) {
 	if (rv != 0) {
 		log->Emsg("XrdPurgeLotMan", "GetBytesToRecover",
 				  "Error getting lot home:", err);
-		// TODO: If we encounter an error and return 0, we'll never recover any
-		// space. Need to think about how to fall back to age-based purging when
-		// this is the case.
 		return 0;
 	}
 	auto lotUpdateJson = reconstructPathsAndBuildJson(purge_shot);
@@ -391,21 +401,35 @@ long long XrdPurgeLotMan::GetBytesToRecover(const DataFsPurgeshot &purge_shot) {
 	if (rv != 0) {
 		log->Emsg("XrdPurgeLotMan", "GetBytesToRecover",
 				  "Error updating lot usage by dir:", err);
-		// TODO: If we encounter an error and return 0, we'll never recover any
-		// space. Need to think about how to fall back to age-based purging when
-		// this is the case.
+		return 0;
+	}
+
+	long long HWMComparator;
+	long long LWMComparator;
+	// Prefer file usage info, but fall back to HWM/LWM if not available
+	if (GetConfiguredFUsageBaseline() > 0 && GetConfiguredFUsageNominal() > 0 &&
+		GetConfiguredFUsageMax() > 0) {
+		HWMComparator = GetConfiguredFUsageMax();
+		LWMComparator = GetConfiguredFUsageBaseline();
+	} else if (GetConfiguredHWM() > 0 && GetConfiguredLWM() > 0) {
+		HWMComparator = GetConfiguredHWM();
+		LWMComparator = GetConfiguredLWM();
+	} else {
+		log->Emsg("XrdPurgeLotMan", "GetBytesToRecover",
+				  "No valid HWM/LWM or file usage info available. Cannot "
+				  "determine how much to recover.");
 		return 0;
 	}
 
 	// Get the total usage across root lots.
 	long long totalUsageB = getTotalUsageB();
-	if (totalUsageB < GetConfiguredHWM()) {
+	if (totalUsageB < HWMComparator) {
 		// In this case, it's actually true that we have nothing to recover.
 		return 0;
 	}
 
 	// We've determined there's something to purge
-	long long bytesToRecover = totalUsageB - conf.m_diskUsageLWM;
+	long long bytesToRecover = totalUsageB - LWMComparator;
 	long long bytesRemaining = bytesToRecover;
 	log->Emsg(
 		"XrdPurgeLotMan", "GetBytesToRecover",
@@ -419,7 +443,7 @@ long long XrdPurgeLotMan::GetBytesToRecover(const DataFsPurgeshot &purge_shot) {
 
 	for (const auto &[dir, stats] : m_purge_dirs) {
 		DirInfo update;
-		update.path = dir;
+		update.path = (std::filesystem::path(dir) / "").string();
 		update.nBytesToRecover = stats->dir_b_to_purge;
 
 		m_list.push_back(update);

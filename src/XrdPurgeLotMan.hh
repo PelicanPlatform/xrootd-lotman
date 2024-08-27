@@ -10,7 +10,7 @@
 #include <nlohmann/json.hpp>
 #include <unordered_set>
 
-#define GB2B 1024ll * 1024ll * 1024ll
+#define GB2B (1000ll * 1000ll * 1000ll)
 #define BLKSZ 512ll
 
 namespace fs = std::filesystem;
@@ -48,7 +48,7 @@ json dirNodeToJson(const DirNode *node,
 	const auto usage = purge_shot.find_dir_usage_for_dir_path(node->path);
 	if (usage) {
 		dirJson["size_GB"] =
-			static_cast<double>(usage->m_StBlocks) * BLKSZ / GB2B;
+			(static_cast<double>(usage->m_StBlocks) * BLKSZ) / GB2B;
 	} else {
 		dirJson["size_GB"] = 0.0;
 	}
@@ -127,6 +127,9 @@ class XrdPurgeLotMan : public PurgePin {
 
 	long long GetConfiguredHWM();
 	long long GetConfiguredLWM();
+	long long GetConfiguredFUsageBaseline();
+	long long GetConfiguredFUsageNominal();
+	long long GetConfiguredFUsageMax();
 
 	// Custom deleter for unique pointers in which LM allocates some memory
 	// Used to guarantee we call `lotman_free_string_list` on these pointers
@@ -177,7 +180,6 @@ class XrdPurgeLotMan : public PurgePin {
   protected:
 	std::string getLotHome() { return m_lotman_conf.GetLotHome(); }
 
-  private:
 	std::map<std::string, std::unique_ptr<PurgeDirCandidateStats>> m_purge_dirs;
 	LotManConfiguration m_lotman_conf;
 
