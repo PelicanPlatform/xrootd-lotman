@@ -37,7 +37,7 @@ PurgePolicy getPolicyFromConfigName(const std::string &policy) {
 }
 
 XrdPurgeLotMan::XrdPurgeLotMan()
-	: m_purge_dirs{}, log(XrdPfc::Cache::GetInstance().GetLog()) {}
+	: log(XrdPfc::Cache::GetInstance().GetLog()), m_purge_dirs{} {}
 
 XrdPurgeLotMan::~XrdPurgeLotMan() {}
 
@@ -190,7 +190,7 @@ void XrdPurgeLotMan::completePurgePolicyBase(const DataFsPurgeshot &purgeShot,
 											 XrdPfc::PurgePolicy policy) {
 	char **lots;
 	char *err;
-	int rv;
+	int rv{-1};
 
 	switch (policy) {
 	case XrdPfc::PurgePolicy::PastDel:
@@ -199,6 +199,11 @@ void XrdPurgeLotMan::completePurgePolicyBase(const DataFsPurgeshot &purgeShot,
 	case XrdPfc::PurgePolicy::PastExp:
 		rv = lotman_get_lots_past_exp(true, &lots, &err);
 		break;
+	default:
+		log->Emsg(
+			"XrdPurgeLotMan", "completePurgePolicyBase",
+			("Unexpected purge policy: " + getPolicyName(policy)).c_str());
+		return;
 	}
 	std::unique_ptr<char *[], LotDeleter> lots_total_purge(lots, LotDeleter());
 	if (rv != 0) {
@@ -269,7 +274,7 @@ void XrdPurgeLotMan::partialPurgePolicyBase(const DataFsPurgeshot &purgeShot,
 	// TODO: Come back and think about whether we want recursive children here
 	//       For now, I'm saying _yes_ because if a child takes up lots of space
 	//       but isn't past its own quota, we still want the option to clear it.
-	int rv;
+	int rv{-1};
 	switch (policy) {
 	case XrdPfc::PurgePolicy::PastOpp:
 		rv = lotman_get_lots_past_opp(true, true, &lots, &err);
@@ -277,6 +282,11 @@ void XrdPurgeLotMan::partialPurgePolicyBase(const DataFsPurgeshot &purgeShot,
 	case XrdPfc::PurgePolicy::PastDed:
 		rv = lotman_get_lots_past_ded(true, true, &lots, &err);
 		break;
+	default:
+		log->Emsg(
+			"XrdPurgeLotMan", "completePurgePolicyBase",
+			("Unexpected purge policy: " + getPolicyName(policy)).c_str());
+		return;
 	}
 	std::unique_ptr<char *[], LotDeleter> lots_partial_purge(lots,
 															 LotDeleter());
@@ -485,7 +495,7 @@ bool XrdPurgeLotMan::validateConfiguration(const char *params) {
 
 	std::vector<PurgePolicy> policies;
 	std::set<PurgePolicy> encountered;
-	for (int i = 1; i < paramVec.size(); ++i) {
+	for (size_t i = 1; i < paramVec.size(); ++i) {
 		PurgePolicy policy = getPolicyFromConfigName(paramVec[i]);
 		if (policy == PurgePolicy::UnknownPolicy) {
 			log->Emsg("XrdPurgeLotMan", "validateConfiguration",
