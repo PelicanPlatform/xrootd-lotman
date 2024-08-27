@@ -32,7 +32,7 @@ set_target_properties(XrdPurgeLotMan PROPERTIES VERSION ${PROJECT_VERSION})
 
 set(LIB_SUFFIX "" CACHE STRING "Library installation directory suffix")
 set(LIB_INSTALL_DIR "lib${LIB_SUFFIX}" CACHE PATH "Library installation directory")
-set(INCLUDE_INSTALL_DIR ${INCLUDE_INSTALL_DIR} CACHE PATH "Include installation directory")
+set(INCLUDE_INSTALL_DIR "include" CACHE PATH "Include installation directory")
 
 install(TARGETS XrdPurgeLotMan
     LIBRARY DESTINATION ${LIB_INSTALL_DIR}
