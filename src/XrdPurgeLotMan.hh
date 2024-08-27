@@ -127,6 +127,9 @@ class XrdPurgeLotMan : public PurgePin {
 
 	long long GetConfiguredHWM();
 	long long GetConfiguredLWM();
+	long long GetConfiguredFUsageBaseline();
+	long long GetConfiguredFUsageNominal();
+	long long GetConfiguredFUsageMax();
 
 	// Custom deleter for unique pointers in which LM allocates some memory
 	// Used to guarantee we call `lotman_free_string_list` on these pointers

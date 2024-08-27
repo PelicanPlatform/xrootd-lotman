@@ -45,6 +45,18 @@ long long XrdPurgeLotMan::GetConfiguredHWM() { return conf.m_diskUsageHWM; }
 
 long long XrdPurgeLotMan::GetConfiguredLWM() { return conf.m_diskUsageLWM; }
 
+long long XrdPurgeLotMan::GetConfiguredFUsageBaseline() {
+	return conf.m_fileUsageBaseline;
+}
+
+long long XrdPurgeLotMan::GetConfiguredFUsageNominal() {
+	return conf.m_fileUsageNominal;
+}
+
+long long XrdPurgeLotMan::GetConfiguredFUsageMax() {
+	return conf.m_fileUsageMax;
+}
+
 struct XrdPurgeLotMan::LotDeleter {
 	void operator()(char **ptr) { lotman_free_string_list(ptr); }
 };
@@ -392,15 +404,32 @@ long long XrdPurgeLotMan::GetBytesToRecover(const DataFsPurgeshot &purge_shot) {
 		return 0;
 	}
 
+	long long HWMComparator;
+	long long LWMComparator;
+	// Prefer file usage info, but fall back to HWM/LWM if not available
+	if (GetConfiguredFUsageBaseline() > 0 && GetConfiguredFUsageNominal() > 0 &&
+		GetConfiguredFUsageMax() > 0) {
+		HWMComparator = GetConfiguredFUsageMax();
+		LWMComparator = GetConfiguredFUsageBaseline();
+	} else if (GetConfiguredHWM() > 0 && GetConfiguredLWM() > 0) {
+		HWMComparator = GetConfiguredHWM();
+		LWMComparator = GetConfiguredLWM();
+	} else {
+		log->Emsg("XrdPurgeLotMan", "GetBytesToRecover",
+				  "No valid HWM/LWM or file usage info available. Cannot "
+				  "determine how much to recover.");
+		return 0;
+	}
+
 	// Get the total usage across root lots.
 	long long totalUsageB = getTotalUsageB();
-	if (totalUsageB < GetConfiguredHWM()) {
+	if (totalUsageB < HWMComparator) {
 		// In this case, it's actually true that we have nothing to recover.
 		return 0;
 	}
 
 	// We've determined there's something to purge
-	long long bytesToRecover = totalUsageB - conf.m_diskUsageLWM;
+	long long bytesToRecover = totalUsageB - LWMComparator;
 	long long bytesRemaining = bytesToRecover;
 	log->Emsg(
 		"XrdPurgeLotMan", "GetBytesToRecover",
@@ -414,7 +443,7 @@ long long XrdPurgeLotMan::GetBytesToRecover(const DataFsPurgeshot &purge_shot) {
 
 	for (const auto &[dir, stats] : m_purge_dirs) {
 		DirInfo update;
-		update.path = dir;
+		update.path = (std::filesystem::path(dir) / "").string();
 		update.nBytesToRecover = stats->dir_b_to_purge;
 
 		m_list.push_back(update);
