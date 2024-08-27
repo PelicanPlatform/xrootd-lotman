@@ -10,6 +10,8 @@ Source0:        https://github.com/PelicanPlatform/xrootd-lotman/archive/v0.0.1.
 BuildRequires:  cmake
 BuildRequires:  g++
 BuildRequires:  make
+BuildRequires:  lotman
+BuildRequires:  xrootd
 
 %description
 This package provides a purge plugin for XRootD that uses Lotman's tracking for informed purges.
