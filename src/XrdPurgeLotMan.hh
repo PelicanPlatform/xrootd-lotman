@@ -72,7 +72,7 @@ json reconstructPathsAndBuildJson(const XrdPfc::DataFsPurgeshot &purge_shot) {
 	std::unordered_map<int, DirNode> indexToDirNode;
 	std::vector<DirNode *> rootDirs;
 
-	for (int i = 0; i < purge_shot.m_dir_vec.size(); ++i) {
+	for (size_t i = 0; i < purge_shot.m_dir_vec.size(); ++i) {
 		const auto &dir_entry = purge_shot.m_dir_vec[i];
 		DirNode &dirNode = indexToDirNode[i];
 		dirNode.path = dir_entry.m_dir_name;

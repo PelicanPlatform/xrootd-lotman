@@ -30,8 +30,17 @@ target_link_libraries(XrdPurgeLotMan
 
 set_target_properties(XrdPurgeLotMan PROPERTIES VERSION ${PROJECT_VERSION})
 
+set(LIB_SUFFIX "" CACHE STRING "Library installation directory suffix")
+set(LIB_INSTALL_DIR "lib${LIB_SUFFIX}" CACHE PATH "Library installation directory")
+set(INCLUDE_INSTALL_DIR "include" CACHE PATH "Include installation directory")
+
 install(TARGETS XrdPurgeLotMan
-    LIBRARY DESTINATION lib
+    LIBRARY DESTINATION ${LIB_INSTALL_DIR}
+)
+
+install(DIRECTORY src/
+    DESTINATION ${INCLUDE_INSTALL_DIR}
+    FILES_MATCHING PATTERN "*.hh"
 )
 
 if( XROOTD_PLUGINS_BUILD_UNITTESTS )
