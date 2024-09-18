@@ -11,7 +11,7 @@ BuildRequires:  cmake
 BuildRequires:  g++
 BuildRequires:  make
 BuildRequires:  lotman
-BuildRequires:  xrootd
+BuildRequires:  alja-xrootd
 
 %description
 This package provides a purge plugin for XRootD that uses Lotman's tracking for informed purges.
@@ -28,6 +28,8 @@ This package provides a purge plugin for XRootD that uses Lotman's tracking for 
 %cmake_install
 
 %files
+%license LICENSE
+%doc README.md
 %{_libdir}/libXrdPurgeLotMan.so*
 %{_includedir}/XrdPurgeLotMan.hh
 
