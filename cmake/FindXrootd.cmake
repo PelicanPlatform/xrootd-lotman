@@ -19,6 +19,12 @@ find_library(XROOTD_UTILS_LIB XrdUtils
     PATH_SUFFIXES lib
 )
 
+if(NOT XROOTD_INCLUDES)
+    message(FATAL_ERROR "XrdVersion.hh not found in any of the specified paths")
+else()
+    message(STATUS "Found XrdVersion.hh at ${XROOTD_INCLUDES}")
+endif()
+
 # XrdPfc.so is actually XrdPfc-5.so, where the version (presumably) comes from the
 # XRootD version header file. The following chunk of code tries to predict the name of the lib.
 # Not sure if this is the way I _should_ be doing this, but it seems to work...
@@ -35,7 +41,7 @@ find_library(XROOTD_PFC_LIB
     /usr
     /usr/local
     /opt/xrootd/
-    
+
     PATHS /usr/local/lib64 /usr/lib64
 )
 if( NOT XROOTD_PFC_LIB)
