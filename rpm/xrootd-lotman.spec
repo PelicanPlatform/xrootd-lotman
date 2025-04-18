@@ -35,7 +35,7 @@ This package provides a purge plugin for XRootD that uses Lotman's tracking for 
 %{_includedir}/XrdPurgeLotMan.hh
 
 %changelog
-* Wed Apr 16 2025 MÃ¡tyÃ¡s Selmeci <mselmeci@wisc.edu> - 0.0.2-2
+* Wed Apr 16 2025 Matyas Selmeci <mselmeci@wisc.edu> - 0.0.2-2
 - Require XRootD 5.8 for the build
 
 * Thu Sep 19 2024 Justin Hiemstra <jhiemstra@wisc.edu> - 0.0.2-1
