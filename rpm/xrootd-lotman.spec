@@ -1,6 +1,6 @@
 Name:           xrootd-lotman
 Version:        0.0.2
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        A purge plugin for XRootD that uses Lotman's tracking for informed cache disk management
 
 License:        Apache-2.0
@@ -12,7 +12,7 @@ BuildRequires:  gcc-c++
 BuildRequires:  make
 BuildRequires:  lotman
 BuildRequires:  nlohmann-json-devel
-BuildRequires:  alja-xrootd-server-devel
+BuildRequires:  xrootd-server-devel >= 1:5.8
 
 %description
 This package provides a purge plugin for XRootD that uses Lotman's tracking for informed purges.
@@ -35,6 +35,9 @@ This package provides a purge plugin for XRootD that uses Lotman's tracking for 
 %{_includedir}/XrdPurgeLotMan.hh
 
 %changelog
+* Wed Apr 16 2025 Matyas Selmeci <mselmeci@wisc.edu> - 0.0.2-2
+- Require XRootD 5.8 for the build
+
 * Thu Sep 19 2024 Justin Hiemstra <jhiemstra@wisc.edu> - 0.0.2-1
 - Fixes to packaging and better CMake error messages
 

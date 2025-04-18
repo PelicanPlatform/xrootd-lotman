@@ -2,7 +2,7 @@
 #define __XRDPURGELOTMAN_HH__
 
 #include <XrdPfc/XrdPfc.hh>
-#include <XrdPfc/XrdPfcDirStateSnapshot.hh>
+#include <XrdPfc/XrdPfcDirStatePurgeshot.hh>
 #include <XrdPfc/XrdPfcPurgePin.hh>
 
 #include <filesystem>
