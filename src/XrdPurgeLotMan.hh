@@ -9,8 +9,8 @@
 #include <map>
 #include <unordered_set>
 
-#define GB2B (1000ll * 1000ll * 1000ll)
-#define BLKSZ 512ll
+class XrdOucGatherConf;
+class XrdSysError;
 
 namespace fs = std::filesystem;
 
@@ -32,13 +32,13 @@ std::string getPolicyName(PurgePolicy policy);
 PurgePolicy getPolicyFromConfigName(const std::string &name);
 
 class XrdPurgeLotMan : public PurgePin {
-	XrdSysError *log;
 
   public:
-	XrdPurgeLotMan();
+	XrdPurgeLotMan(XrdSysError &log);
 	virtual ~XrdPurgeLotMan() override;
 
 	const Configuration &conf = Cache::Conf();
+	bool ConfigLog(XrdOucGatherConf &conf, XrdSysError &log);
 
 	virtual long long GetBytesToRecover(const DataFsPurgeshot &) override;
 	virtual bool ConfigPurgePin(const char *params) override;
@@ -96,6 +96,8 @@ class XrdPurgeLotMan : public PurgePin {
 	}
 
   protected:
+	XrdSysError &m_log;
+
 	std::string getLotHome() { return m_lotman_conf.GetLotHome(); }
 
 	std::map<std::string, std::unique_ptr<PurgeDirCandidateStats>> m_purge_dirs;

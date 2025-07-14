@@ -20,6 +20,7 @@ include_directories(${LOTMAN_INCLUDES})
 
 add_library(XrdPurgeLotMan SHARED
     src/XrdPurgeLotMan.cc
+    src/XrdPurgeLotManUtils.cc
 )
 
 target_link_libraries(XrdPurgeLotMan
