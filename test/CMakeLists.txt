@@ -2,6 +2,11 @@ add_executable( xrootd-lotman-gtest xrootd-lotman-tests.cc
   ../src/XrdPurgeLotMan.cc
 )
 
+# Define the absolute path to the resources directory for tests
+target_compile_definitions(xrootd-lotman-gtest PRIVATE
+    TEST_RESOURCES_DIR="${CMAKE_CURRENT_BINARY_DIR}/resources"
+)
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 
 if(XROOTD_PLUGINS_EXTERNAL_GTEST)

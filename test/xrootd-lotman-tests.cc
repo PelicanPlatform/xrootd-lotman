@@ -11,6 +11,11 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+// Should be overriden by CMake
+#ifndef TEST_RESOURCES_DIR
+#define TEST_RESOURCES_DIR "<build dir>/test/resources"
+#endif
+
 using json = nlohmann::json;
 using namespace XrootdLotMan;
 
@@ -66,9 +71,11 @@ class XrdPurgeLotManTest : public XrdPfc::XrdPurgeLotMan {
 	XrdPurgeLotManTest() : XrdPurgeLotMan(err) {}
 
 	XrdPurgeLotManTest(const std::string &configfn) : XrdPurgeLotMan(err) {
-		// Use the current working directory (where the test binary runs)
-		std::filesystem::path cwd = std::filesystem::current_path();
-		std::string configPath = (cwd / "resources" / configfn).string();
+		// TEST_RESOURCES_DIR is a macro defined in the test directory's
+		// CMakeLists.txt.
+		// It will point to <build dir>/test/resources
+		std::string configPath =
+			std::string(TEST_RESOURCES_DIR) + "/" + configfn;
 		setenv("XRDCONFIGFN", configPath.c_str(), 1); // 1 = overwrite
 		// Also need to set some xrootd instance for XrdOucGather to function
 		// properly
