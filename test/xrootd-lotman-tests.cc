@@ -1,12 +1,18 @@
 #include "../src/XrdPurgeLotMan.hh"
+#include "../src/XrdPurgeLotManUtils.hh"
 
 #include <XrdPfc/XrdPfc.hh>
+#include <XrdSys/XrdSysError.hh>
+#include <XrdSys/XrdSysLogger.hh>
 #include <lotman/lotman.h>
 
 #include <chrono>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+using namespace XrootdLotMan;
 
 class LMSetupTeardown : public ::testing::Test {
   protected:
@@ -54,12 +60,28 @@ std::string LMSetupTeardown::tmp_dir;
 
 class XrdPurgeLotManTest : public XrdPfc::XrdPurgeLotMan {
   public:
-	XrdPurgeLotManTest() {}
+	XrdSysLogger log{};
+	XrdSysError err{&log, "TestXrdPurgeLotMan"};
+
+	XrdPurgeLotManTest() : XrdPurgeLotMan(err) {}
+
+	XrdPurgeLotManTest(const std::string &configfn) : XrdPurgeLotMan(err) {
+		// Use the current working directory (where the test binary runs)
+		std::filesystem::path cwd = std::filesystem::current_path();
+		std::string configPath = (cwd / "resources" / configfn).string();
+		setenv("XRDCONFIGFN", configPath.c_str(), 1); // 1 = overwrite
+		// Also need to set some xrootd instance for XrdOucGather to function
+		// properly
+		setenv("XRDINSTANCE", "test foo@bar", 1);
+	}
 
 	~XrdPurgeLotManTest() override = default;
 
 	long long testGetTotalUsageB() { return getTotalUsageB(); }
 	LotManConfiguration testGetLotmanConf() { return m_lotman_conf; }
+	std::string GetLogLevelString() const {
+		return LogMaskToString(m_log.getMsgMask());
+	}
 };
 
 void populatePurgeElement(XrdPfc::DirPurgeElement &element,
@@ -153,7 +175,9 @@ TEST(DirNodeToJsonTest, ConstructsJsonForEmptyDirs) {
 	purge_shot.m_dir_vec.push_back(subElement2);
 	purge_shot.m_dir_vec.push_back(subElement3);
 
-	json result = dirNodeToJson(&node, purge_shot);
+	XrdSysLogger log{};
+	XrdSysError err{&log, "TestXrdPurgeLotMan"};
+	json result = dirNodeToJson(&node, purge_shot, err);
 
 	// Validatation
 	EXPECT_EQ(result["path"], "dir");
@@ -196,7 +220,9 @@ TEST(reconstructPathsAndBuildJson, TypicalCase) {
 	purge_shot.m_dir_vec.push_back(subElement2);
 	purge_shot.m_dir_vec.push_back(subElement3);
 
-	json result = reconstructPathsAndBuildJson(purge_shot);
+	XrdSysLogger log{};
+	XrdSysError err{&log, "TestXrdPurgeLotMan"};
+	json result = reconstructPathsAndBuildJson(purge_shot, err);
 
 	// Validation
 	EXPECT_EQ(result.size(), 1);
@@ -357,9 +383,10 @@ TEST_F(LMSetupTeardown, ValidPurgePinConfigTest) {
 	std::string lotHome = LMSetupTeardown::tmp_dir;
 	std::string configParams = lotHome + " exp opp ded";
 
-	XrdPurgeLotManTest testPurgePin{};
+	XrdPurgeLotManTest testPurgePin{"trace-log-level.cfg"};
 	bool rv = testPurgePin.ConfigPurgePin(configParams.c_str());
 	ASSERT_TRUE(rv);
+	EXPECT_EQ(testPurgePin.GetLogLevelString(), "trace");
 
 	std::vector<PurgePolicy> expectedPolicies = {
 		PurgePolicy::PastExp, PurgePolicy::PastOpp, PurgePolicy::PastDed};

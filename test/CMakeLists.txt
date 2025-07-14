@@ -25,3 +25,19 @@ add_test(
   COMMAND
     ${CMAKE_CURRENT_BINARY_DIR}/xrootd-lotman-gtest
 )
+
+# Copy the resources directory to the build/test directory
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/resources
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/resources
+            ${CMAKE_CURRENT_BINARY_DIR}/resources
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/resources
+    COMMENT "Copying test resources directory"
+)
+
+add_custom_target(copy_resources ALL
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/resources
+)
+
+add_dependencies(xrootd-lotman-gtest copy_resources)
