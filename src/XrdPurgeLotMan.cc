@@ -1,11 +1,21 @@
 #include "XrdPurgeLotMan.hh"
+#include "XrdPurgeLotManUtils.hh"
+
+#include <XrdOuc/XrdOucEnv.hh>
+#include <XrdOuc/XrdOucGatherConf.hh>
+#include <XrdSys/XrdSysError.hh>
 
 #include <lotman/lotman.h>
+#include <nlohmann/json.hpp>
 
 #include <sstream>
 #include <string>
 
+using json = nlohmann::json;
+
 namespace XrdPfc {
+
+using namespace XrootdLotMan;
 
 std::string getPolicyName(PurgePolicy policy) {
 	switch (policy) {
@@ -36,8 +46,7 @@ PurgePolicy getPolicyFromConfigName(const std::string &policy) {
 	}
 }
 
-XrdPurgeLotMan::XrdPurgeLotMan()
-	: log(XrdPfc::Cache::GetInstance().GetLog()), m_purge_dirs{} {}
+XrdPurgeLotMan::XrdPurgeLotMan(XrdSysError &log) : m_log(log), m_purge_dirs{} {}
 
 XrdPurgeLotMan::~XrdPurgeLotMan() {}
 
@@ -71,8 +80,8 @@ long long XrdPurgeLotMan::getTotalUsageB() {
 	auto rv = lotman_list_all_lots(&rawLots, &err);
 	std::unique_ptr<char *[], LotDeleter> lots(rawLots, LotDeleter());
 	if (rv != 0) {
-		log->Emsg("XrdPurgeLotMan", "getTotalUsageB",
-				  ("Error getting all lots: " + std::string(err)).c_str());
+		m_log.Emsg("XrdPurgeLotMan", "getTotalUsageB",
+				   ("Error getting all lots: " + std::string(err)).c_str());
 		return 0;
 	}
 
@@ -84,10 +93,10 @@ long long XrdPurgeLotMan::getTotalUsageB() {
 		if (int rc = lotman_is_root(lotName.c_str(), &err); rc != 1) {
 			// Not root, or an error
 			if (rc < 0) {
-				log->Emsg("XrdPurgeLotMan", "getTotalUsageB",
-						  ("Error checking if lot '" + lotName +
-						   "' is root: " + std::string(err))
-							  .c_str());
+				m_log.Emsg("XrdPurgeLotMan", "getTotalUsageB",
+						   ("Error checking if lot '" + lotName +
+							"' is root: " + std::string(err))
+							   .c_str());
 			}
 
 			continue;
@@ -125,9 +134,10 @@ XrdPurgeLotMan::lotPerDirUsageB(const std::string &lot,
 	char *err;
 	auto rv = lotman_get_lot_dirs(lot.c_str(), true, &dirs, &err);
 	if (rv != 0) {
-		log->Emsg("XrdPurgeLotMan", "lotPerDirUsageB",
-				  ("Error getting dirs in lot " + lot + ": " + std::string(err))
-					  .c_str());
+		m_log.Emsg(
+			"XrdPurgeLotMan", "lotPerDirUsageB",
+			("Error getting dirs in lot " + lot + ": " + std::string(err))
+				.c_str());
 		return usageMap;
 	}
 
@@ -138,8 +148,8 @@ XrdPurgeLotMan::lotPerDirUsageB(const std::string &lot,
 		// Get the usage for the directory
 		const DirUsage *dirUsage = purge_shot.find_dir_usage_for_dir_path(path);
 		if (dirUsage == nullptr) {
-			log->Emsg("XrdPurgeLotMan", "lotPerDirUsageB",
-					  ("Error finding usage for directory " + path).c_str());
+			m_log.Emsg("XrdPurgeLotMan", "lotPerDirUsageB",
+					   ("Error finding usage for directory " + path).c_str());
 			continue;
 		}
 		long long bytesToRecover =
@@ -200,23 +210,23 @@ void XrdPurgeLotMan::completePurgePolicyBase(const DataFsPurgeshot &purgeShot,
 		rv = lotman_get_lots_past_exp(true, &lots, &err);
 		break;
 	default:
-		log->Emsg(
+		m_log.Emsg(
 			"XrdPurgeLotMan", "completePurgePolicyBase",
 			("Unexpected purge policy: " + getPolicyName(policy)).c_str());
 		return;
 	}
 	std::unique_ptr<char *[], LotDeleter> lots_total_purge(lots, LotDeleter());
 	if (rv != 0) {
-		log->Emsg("XrdPurgeLotMan", "completePurgePolicyBase",
-				  ("Error getting lots for policy " + getPolicyName(policy) +
-				   ": " + std::string(err))
-					  .c_str());
+		m_log.Emsg("XrdPurgeLotMan", "completePurgePolicyBase",
+				   ("Error getting lots for policy " + getPolicyName(policy) +
+					": " + std::string(err))
+					   .c_str());
 		return;
 	}
-	log->Emsg("XrdPurgeLotMan", "completePurgePolicyBase",
-			  ("Purge policy " + getPolicyName(policy) +
-			   " requires clearing lots: " + convertListToString(lots))
-				  .c_str());
+	m_log.Emsg("XrdPurgeLotMan", "completePurgePolicyBase",
+			   ("Purge policy " + getPolicyName(policy) +
+				" requires clearing lots: " + convertListToString(lots))
+				   .c_str());
 
 	// While there's still global space to clear, get directory usage
 	// for each of the directories tied to each lot
@@ -283,7 +293,7 @@ void XrdPurgeLotMan::partialPurgePolicyBase(const DataFsPurgeshot &purgeShot,
 		rv = lotman_get_lots_past_ded(true, true, &lots, &err);
 		break;
 	default:
-		log->Emsg(
+		m_log.Emsg(
 			"XrdPurgeLotMan", "completePurgePolicyBase",
 			("Unexpected purge policy: " + getPolicyName(policy)).c_str());
 		return;
@@ -292,16 +302,16 @@ void XrdPurgeLotMan::partialPurgePolicyBase(const DataFsPurgeshot &purgeShot,
 															 LotDeleter());
 
 	if (rv != 0) {
-		log->Emsg("XrdPurgeLotMan", "partialPurgePolicyBase",
-				  ("Error getting lots for policy " + getPolicyName(policy) +
-				   ": " + std::string(err))
-					  .c_str());
+		m_log.Emsg("XrdPurgeLotMan", "partialPurgePolicyBase",
+				   ("Error getting lots for policy " + getPolicyName(policy) +
+					": " + std::string(err))
+					   .c_str());
 		return;
 	}
-	log->Emsg("XrdPurgeLotMan", "partialPurgePolicyBase",
-			  ("Purge policy " + getPolicyName(policy) +
-			   " requires clearing lots: " + convertListToString(lots))
-				  .c_str());
+	m_log.Emsg("XrdPurgeLotMan", "partialPurgePolicyBase",
+			   ("Purge policy " + getPolicyName(policy) +
+				" requires clearing lots: " + convertListToString(lots))
+				   .c_str());
 
 	// Get directory usage for each of the directories tied to each lot
 	for (int i = 0; lots[i] != nullptr; ++i) {
@@ -325,10 +335,10 @@ void XrdPurgeLotMan::partialPurgePolicyBase(const DataFsPurgeshot &purgeShot,
 		char *output;
 		rv = lotman_get_lot_usage(usageQueryJSON.dump().c_str(), &output, &err);
 		if (rv != 0) {
-			log->Emsg("XrdPurgeLotMan", "partialPurgePolicyBase",
-					  ("Error getting lot usage for " + lotName + ": " +
-					   std::string(err))
-						  .c_str());
+			m_log.Emsg("XrdPurgeLotMan", "partialPurgePolicyBase",
+					   ("Error getting lot usage for " + lotName + ": " +
+						std::string(err))
+						   .c_str());
 			continue;
 		}
 
@@ -400,17 +410,17 @@ long long XrdPurgeLotMan::GetBytesToRecover(const DataFsPurgeshot &purge_shot) {
 	char *output;
 	auto rv = lotman_get_context_str("lot_home", &output, &err);
 	if (rv != 0) {
-		log->Emsg("XrdPurgeLotMan", "GetBytesToRecover",
-				  "Error getting lot home:", err);
+		m_log.Emsg("XrdPurgeLotMan", "GetBytesToRecover",
+				   "Error getting lot home:", err);
 		return 0;
 	}
-	auto lotUpdateJson = reconstructPathsAndBuildJson(purge_shot);
+	auto lotUpdateJson = reconstructPathsAndBuildJson(purge_shot, m_log);
 
 	rv = lotman_update_lot_usage_by_dir(lotUpdateJson.dump().c_str(), false,
 										&err);
 	if (rv != 0) {
-		log->Emsg("XrdPurgeLotMan", "GetBytesToRecover",
-				  "Error updating lot usage by dir:", err);
+		m_log.Emsg("XrdPurgeLotMan", "GetBytesToRecover",
+				   "Error updating lot usage by dir:", err);
 		return 0;
 	}
 
@@ -425,9 +435,9 @@ long long XrdPurgeLotMan::GetBytesToRecover(const DataFsPurgeshot &purge_shot) {
 		HWMComparator = GetConfiguredHWM();
 		LWMComparator = GetConfiguredLWM();
 	} else {
-		log->Emsg("XrdPurgeLotMan", "GetBytesToRecover",
-				  "No valid HWM/LWM or file usage info available. Cannot "
-				  "determine how much to recover.");
+		m_log.Emsg("XrdPurgeLotMan", "GetBytesToRecover",
+				   "No valid HWM/LWM or file usage info available. Cannot "
+				   "determine how much to recover.");
 		return 0;
 	}
 
@@ -441,7 +451,7 @@ long long XrdPurgeLotMan::GetBytesToRecover(const DataFsPurgeshot &purge_shot) {
 	// We've determined there's something to purge
 	long long bytesToRecover = totalUsageB - LWMComparator;
 	long long bytesRemaining = bytesToRecover;
-	log->Emsg(
+	m_log.Emsg(
 		"XrdPurgeLotMan", "GetBytesToRecover",
 		("Recoverable bytes: " + std::to_string(bytesToRecover) + " bytes")
 			.c_str());
@@ -485,10 +495,10 @@ bool XrdPurgeLotMan::validateConfiguration(const char *params) {
 	std::filesystem::path lotHome(paramVec[0]);
 	if (!std::filesystem::exists(lotHome) &&
 		!std::filesystem::is_directory(lotHome)) {
-		log->Emsg("XrdPurgeLotMan", "validateConfiguration",
-				  ("The provided lot home of '" + lotHome.string() +
-				   "' does not exist.")
-					  .c_str());
+		m_log.Emsg("XrdPurgeLotMan", "validateConfiguration",
+				   ("The provided lot home of '" + lotHome.string() +
+					"' does not exist.")
+					   .c_str());
 		return false;
 	}
 	cfg.SetLotHome(lotHome.string());
@@ -498,15 +508,15 @@ bool XrdPurgeLotMan::validateConfiguration(const char *params) {
 	for (size_t i = 1; i < paramVec.size(); ++i) {
 		PurgePolicy policy = getPolicyFromConfigName(paramVec[i]);
 		if (policy == PurgePolicy::UnknownPolicy) {
-			log->Emsg("XrdPurgeLotMan", "validateConfiguration",
-					  ("Unknown policy: " + paramVec[i]).c_str());
+			m_log.Emsg("XrdPurgeLotMan", "validateConfiguration",
+					   ("Unknown policy: " + paramVec[i]).c_str());
 			return false;
 		}
 		// Insert and check for duplicates in one step
 		auto result = encountered.insert(policy);
 		if (!result.second) {
-			log->Emsg("XrdPurgeLotMan", "validateConfiguration",
-					  ("Duplicate policy detected: " + paramVec[i]).c_str());
+			m_log.Emsg("XrdPurgeLotMan", "validateConfiguration",
+					   ("Duplicate policy detected: " + paramVec[i]).c_str());
 			return false;
 		}
 
@@ -525,23 +535,102 @@ bool XrdPurgeLotMan::validateConfiguration(const char *params) {
 	return true;
 }
 
+bool XrdPurgeLotMan::ConfigLog(XrdOucGatherConf &conf, XrdSysError &log) {
+	char *val = nullptr;
+	int mask = 0;
+	if (!(val = conf.GetToken())) {
+		log.Emsg("Config",
+				 "lotman.trace requires an argument.  Usage: "
+				 "lotman.trace [trace|debug|info|warning|error|none]");
+		return false;
+	}
+
+	do {
+		if (!strcmp(val, "trace")) {
+			mask |= LogMask::Trace | LogMask::Debug | LogMask::Info |
+					LogMask::Warning | LogMask::Error;
+		} else if (!strcmp(val, "debug")) {
+			mask |= LogMask::Debug | LogMask::Info | LogMask::Warning |
+					LogMask::Error;
+		} else if (!strcmp(val, "info")) {
+			mask |= LogMask::Info | LogMask::Warning | LogMask::Error;
+		} else if (!strcmp(val, "warning")) {
+			mask |= LogMask::Warning | LogMask::Error;
+		} else if (!strcmp(val, "error")) {
+			mask |= LogMask::Error;
+		} else if (!strcmp(val, "none")) {
+			mask = 0;
+		} else {
+			log.Emsg("Config",
+					 "lotman.trace encountered an unknown directive:", val);
+			return false;
+		}
+	} while ((val = conf.GetToken()));
+	log.setMsgMask(mask);
+	log.Emsg("Config", "Lotman Purge Plugin's enabled logging level:",
+			 LogMaskToString(mask).c_str());
+	return true;
+}
+
 // Handle configuration for the plugin
 bool XrdPurgeLotMan::ConfigPurgePin(const char *params) {
+	// The passed params are what get specified after pfc.purgelib,
+	// but we want to define additional config parameters directly in XRootD's
+	// config file for the xrootd-lotman purge lib using the `lotman` prefix.
+	// Doing this requires getting the config filename and reparsing (which is
+	// apparently canonical in the XRootD ecosystem...). The XRDCONFIGFN env var
+	// is set internally by XRootD and provides the config file path.
+	//
+	// See https://xrootd.web.cern.ch/doc/dev57/xrd_config.pdf, section
+	// "1.2.5, Exported Environment Variables"
+	const char *configfn = getenv("XRDCONFIGFN");
+	if (!configfn) {
+		m_log.Emsg(
+			"XrdPurgeLotMan", "ConfigPurgePin",
+			"XRDCONFIGFN environment variable is not set. Unable to proceed.");
+		return false;
+	}
+
+	XrdOucEnv myEnv;
+	XrdOucGatherConf purgelotman_conf("lotman.", &m_log);
+	int result;
+	if ((result = purgelotman_conf.Gather(configfn,
+										  XrdOucGatherConf::full_lines)) < 0) {
+		std::string msg = "Failed to parse config file while configuring purge "
+						  "plugin; error code: " +
+						  std::to_string(-result);
+		m_log.Emsg("XrdPurgeLotMan", "ConfigPurgePin", msg.c_str());
+		return false;
+	}
+
+	// Set a default log level. Should be overridden if the user provides their
+	// own `lotman.trace` config
+	m_log.setMsgMask(LogMask::Error);
+	while (purgelotman_conf.GetLine()) {
+		auto attribute = purgelotman_conf.GetToken();
+		if (!strcmp(attribute, "lotman.trace")) {
+			if (!XrdPurgeLotMan::ConfigLog(purgelotman_conf, m_log)) {
+				m_log.Emsg("Config", "Failed to configure the log level");
+			}
+			continue;
+		}
+	}
+
 	(void)params; // Avoid unused parameter warning
 
 	if (!validateConfiguration(params)) {
-		log->Emsg("XrdPurgeLotMan", "ConfigPurgePin",
-				  "Configuration validation failed.");
+		m_log.Emsg("XrdPurgeLotMan", "ConfigPurgePin",
+				   "Configuration validation failed.");
 		return false;
 	};
 
 	char *err;
 	auto rv = lotman_set_context_str("lot_home", getLotHome().c_str(), &err);
 	if (rv != 0) {
-		log->Emsg("XrdPurgeLotMan", "ConfigPurgePin",
-				  ("Error setting lot home to '" + getLotHome() +
-				   "': " + std::string(err))
-					  .c_str());
+		m_log.Emsg("XrdPurgeLotMan", "ConfigPurgePin",
+				   ("Error setting lot home to '" + getLotHome() +
+					"': " + std::string(err))
+					   .c_str());
 		return false;
 	}
 
@@ -556,7 +645,7 @@ bool XrdPurgeLotMan::ConfigPurgePin(const char *params) {
 
 // Return a purge object to use.
 extern "C" {
-XrdPfc::PurgePin *XrdPfcGetPurgePin(XrdSysError &) {
-	return new XrdPfc::XrdPurgeLotMan();
+XrdPfc::PurgePin *XrdPfcGetPurgePin(XrdSysError &log) {
+	return new XrdPfc::XrdPurgeLotMan(log);
 }
 }
