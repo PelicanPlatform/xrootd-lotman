@@ -1,11 +1,21 @@
 #include "XrdPurgeLotMan.hh"
+#include "XrdPurgeLotManUtils.hh"
+
+#include <XrdOuc/XrdOucEnv.hh>
+#include <XrdOuc/XrdOucGatherConf.hh>
+#include <XrdSys/XrdSysError.hh>
 
 #include <lotman/lotman.h>
+#include <nlohmann/json.hpp>
 
 #include <sstream>
 #include <string>
 
+using json = nlohmann::json;
+
 namespace XrdPfc {
+
+using namespace XrootdLotMan;
 
 std::string getPolicyName(PurgePolicy policy) {
 	switch (policy) {

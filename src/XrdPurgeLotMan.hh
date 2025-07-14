@@ -7,94 +7,12 @@
 
 #include <filesystem>
 #include <map>
-#include <nlohmann/json.hpp>
 #include <unordered_set>
 
 #define GB2B (1000ll * 1000ll * 1000ll)
 #define BLKSZ 512ll
 
 namespace fs = std::filesystem;
-using json = nlohmann::json;
-
-namespace {
-// Function to convert char*** to std::string for logging
-std::string convertListToString(char **stringArr) {
-	if (stringArr == nullptr) {
-		return "";
-	}
-	std::string result;
-	for (int i = 0; stringArr[i] != nullptr; ++i) {
-		if (i > 0) {
-			result += ", ";
-		}
-		result += stringArr[i];
-	}
-	return result;
-}
-
-struct DirNode {
-	std::filesystem::path path;
-	std::vector<DirNode *> subDirs; // Pointers to subdirectories
-};
-
-// Given a DirNode, convert it to the JSON object used by LotMan for updating
-// lot usage
-json dirNodeToJson(const DirNode *node,
-				   const XrdPfc::DataFsPurgeshot &purge_shot) {
-	nlohmann::json dirJson;
-	std::filesystem::path dirPath(node->path);
-	dirJson["path"] = dirPath.filename().string();
-
-	const auto usage = purge_shot.find_dir_usage_for_dir_path(node->path);
-	if (usage) {
-		dirJson["size_GB"] =
-			(static_cast<double>(usage->m_StBlocks) * BLKSZ) / GB2B;
-	} else {
-		dirJson["size_GB"] = 0.0;
-	}
-
-	if (!node->subDirs.empty()) {
-		dirJson["includes_subdirs"] = true;
-		for (const auto *subDir : node->subDirs) {
-			dirJson["subdirs"].push_back(dirNodeToJson(subDir, purge_shot));
-		}
-	} else {
-		dirJson["includes_subdirs"] = false;
-	}
-
-	return dirJson;
-}
-
-// Loop over the purge_shot's directory vector, and reconstruct the paths for
-// LotMan. Doing this allows us to build a usage update JSON, which tells LotMan
-// about our current understanding of cache's disk usage.
-json reconstructPathsAndBuildJson(const XrdPfc::DataFsPurgeshot &purge_shot) {
-	std::unordered_map<int, DirNode> indexToDirNode;
-	std::vector<DirNode *> rootDirs;
-
-	for (size_t i = 0; i < purge_shot.m_dir_vec.size(); ++i) {
-		const auto &dir_entry = purge_shot.m_dir_vec[i];
-		DirNode &dirNode = indexToDirNode[i];
-		dirNode.path = dir_entry.m_dir_name;
-		if (dir_entry.m_parent != -1) {
-			dirNode.path = std::filesystem::path("/") /
-						   indexToDirNode[dir_entry.m_parent].path /
-						   dirNode.path;
-			indexToDirNode[dir_entry.m_parent].subDirs.push_back(&dirNode);
-			if (dir_entry.m_parent == 0) {
-				rootDirs.push_back(&dirNode);
-			}
-		}
-	}
-
-	nlohmann::json allDirsJson = nlohmann::json::array();
-	for (const auto *rootDir : rootDirs) {
-		allDirsJson.push_back(dirNodeToJson(rootDir, purge_shot));
-	}
-
-	return allDirsJson;
-}
-} // End of anonymous namespace
 
 namespace XrdPfc {
 
