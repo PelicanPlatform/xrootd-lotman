@@ -48,8 +48,17 @@ json XrootdLotMan::dirNodeToJson(const DirNode *node,
 
 	const auto usage = purge_shot.find_dir_usage_for_dir_path(node->path);
 	if (usage) {
-		dirJson["size_GB"] =
-			(static_cast<double>(usage->m_StBlocks) * BLKSZ) / GB2B;
+		long long blocks = usage->m_StBlocks;
+		if (blocks < 0) {
+			log.Log(LogMask::Error, "XrootdLotMan::dirNodeToJson",
+					("Negative block count reported by XRootD for directory: " +
+					 dirPath.string())
+						.c_str(),
+					"; Will zero out");
+			blocks = 0;
+		}
+
+		dirJson["size_GB"] = (static_cast<double>(blocks) * BLKSZ) / GB2B;
 	} else {
 		dirJson["size_GB"] = 0.0;
 	}
