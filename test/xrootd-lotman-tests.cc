@@ -370,7 +370,9 @@ TEST_F(LMSetupTeardown, GetTotalUsageBTest) {
 
 	std::string usageUpdateStr = usageUpdateJSON.dump();
 	const char *usageUpdateCStr = usageUpdateStr.c_str();
-	rv = lotman_update_lot_usage_by_dir(usageUpdateCStr, false, &err);
+	rv = lotman_update_lot_usage_by_dir(usageUpdateCStr, false,
+										static_cast<int64_t>(currentTimeMSEpoch),
+										&err);
 	ASSERT_TRUE(rv == 0) << err;
 
 	long long totalUsage;
@@ -432,6 +434,133 @@ namespace XrdPfc;
 	ASSERT_FALSE(rv);
 }
 */
+
+// Verifies that ConfigPurgePin sets the "caller" context to "root" so that
+// authorisation-gated lotman APIs (reclaim_lot, update_lot_usage_by_dir,
+// remove_lot) succeed when invoked by the purge plugin running under xrootd.
+TEST_F(LMSetupTeardown, ConfigPurgePinSetsRootCallerContext) {
+	using namespace XrdPfc;
+
+	// Stash the existing caller context so this test doesn't bleed state into
+	// later tests that rely on caller="owner1" set in SetUpTestSuite.
+	char *prevCaller = nullptr;
+	char *err = nullptr;
+	(void)lotman_get_context_str("caller", &prevCaller, &err);
+	std::unique_ptr<char, decltype(&free)> prevCallerOwner(prevCaller, free);
+
+	std::string lotHome = LMSetupTeardown::tmp_dir;
+	std::string configParams = lotHome;
+	XrdPurgeLotManTest testPurgePin{"trace-log-level.cfg"};
+	ASSERT_TRUE(testPurgePin.ConfigPurgePin(configParams.c_str()));
+
+	char *caller = nullptr;
+	auto rv = lotman_get_context_str("caller", &caller, &err);
+	std::unique_ptr<char, decltype(&free)> callerOwner(caller, free);
+	ASSERT_EQ(rv, 0) << (err ? err : "(null)");
+	ASSERT_NE(caller, nullptr);
+	EXPECT_STREQ(caller, "root");
+
+	// Restore previous caller for downstream tests. lotman context is
+	// process-global so leaking caller="root" would break later tests that
+	// expect to act as the lot owner.
+	const char *toRestore = prevCaller ? prevCaller : "owner1";
+	(void)lotman_set_context_str("caller", toRestore, &err);
+}
+
+// Smoke test for the new reclamation ledger API. The complete-purge code path
+// in completePurgePolicyBase calls lotman_reclaim_lot after scheduling drains;
+// this test exercises the bare API to confirm:
+//   1. Reclaiming an active lot returns OK on first call.
+//   2. A second reclaim of the same lot returns ALREADY_RECLAIMED, not an
+//      error — so successive purge ticks won't false-alarm.
+//   3. After reclamation, get_lots_past_exp(include_reclaimed=false) no longer
+//      lists the lot, but include_reclaimed=true still does.
+TEST_F(LMSetupTeardown, ReclaimLotIsIdempotentAndFiltersFromGetLotsPastExp) {
+	// lotman context is process-global; the prior test
+	// (ConfigPurgePinSetsRootCallerContext) may have left caller="root".
+	// Force caller to "owner1" so the lot we add here is owned by an
+	// identity authorised to reclaim it.
+	char *err = nullptr;
+	ASSERT_EQ(lotman_set_context_str("caller", "owner1", &err), 0)
+		<< (err ? err : "(null)");
+
+	auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+					 std::chrono::system_clock::now().time_since_epoch())
+					 .count();
+
+	// Lot already expired (expiration_time in the past) so it shows up in
+	// get_lots_past_exp before reclaim.
+	json lotJSON = createLotJSON("reclaim-test", "owner1", "/reclaim-test",
+								 true, 0.001, 0.001,
+								 nowMs - (3600LL * 1000), // creation 1h ago
+								 nowMs - (60LL * 1000),	  // expired 1m ago
+								 nowMs + (3600LL * 1000)); // not yet deletable
+	std::string lotStr = lotJSON.dump();
+	ASSERT_EQ(lotman_add_lot(lotStr.c_str(), &err), 0)
+		<< (err ? err : "(null)");
+
+	// Pre-condition: lot is visible in get_lots_past_exp.
+	{
+		char **lots = nullptr;
+		ASSERT_EQ(lotman_get_lots_past_exp(true, false, &lots, &err), 0)
+			<< (err ? err : "(null)");
+		bool found = false;
+		for (int i = 0; lots && lots[i]; ++i) {
+			if (std::string(lots[i]) == "reclaim-test") {
+				found = true;
+				break;
+			}
+		}
+		lotman_free_string_list(lots);
+		EXPECT_TRUE(found)
+			<< "expected reclaim-test in get_lots_past_exp before reclaim";
+	}
+
+	// First reclaim: OK.
+	int rv = lotman_reclaim_lot("reclaim-test", static_cast<int64_t>(nowMs),
+								"exp", &err);
+	EXPECT_EQ(rv, LOTMAN_RECLAIM_OK) << (err ? err : "(null)");
+
+	// Second reclaim: ALREADY_RECLAIMED, not ERROR. This is the property the
+	// purge plugin relies on: re-running policy on a transient
+	// post-reclaim/pre-prune window must not emit error noise.
+	rv = lotman_reclaim_lot("reclaim-test", static_cast<int64_t>(nowMs + 1),
+							"exp", &err);
+	EXPECT_EQ(rv, LOTMAN_RECLAIM_ALREADY_RECLAIMED)
+		<< (err ? err : "(null)");
+
+	// Post-condition: include_reclaimed=false hides it; include_reclaimed=true
+	// still shows it (forensics window).
+	{
+		char **lots = nullptr;
+		ASSERT_EQ(lotman_get_lots_past_exp(true, false, &lots, &err), 0)
+			<< (err ? err : "(null)");
+		for (int i = 0; lots && lots[i]; ++i) {
+			EXPECT_STRNE(lots[i], "reclaim-test")
+				<< "reclaimed lot should be filtered";
+		}
+		lotman_free_string_list(lots);
+	}
+	{
+		char **lots = nullptr;
+		ASSERT_EQ(lotman_get_lots_past_exp(true, true, &lots, &err), 0)
+			<< (err ? err : "(null)");
+		bool found = false;
+		for (int i = 0; lots && lots[i]; ++i) {
+			if (std::string(lots[i]) == "reclaim-test") {
+				found = true;
+				break;
+			}
+		}
+		lotman_free_string_list(lots);
+		EXPECT_TRUE(found)
+			<< "include_reclaimed=true should still surface reclaimed lot";
+	}
+
+	// Cleanup — remove_lot lets later tests re-use a clean slate even though
+	// SetUpTestSuite already tore the dir.
+	(void)lotman_remove_lot("reclaim-test", true, true, false, false, &err);
+}
 
 // Main test runner
 int main(int argc, char **argv) {

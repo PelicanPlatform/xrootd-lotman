@@ -8,6 +8,7 @@
 #include <lotman/lotman.h>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <sstream>
 #include <string>
 
@@ -204,10 +205,13 @@ void XrdPurgeLotMan::completePurgePolicyBase(const DataFsPurgeshot &purgeShot,
 
 	switch (policy) {
 	case XrdPfc::PurgePolicy::PastDel:
-		rv = lotman_get_lots_past_del(true, &lots, &err);
+		// include_reclaimed=false: do not redrain lots already marked
+		// reclaimed in the lotman ledger. Cleanup loops always pass false
+		// so already-handled lots are skipped on subsequent ticks.
+		rv = lotman_get_lots_past_del(true, false, &lots, &err);
 		break;
 	case XrdPfc::PurgePolicy::PastExp:
-		rv = lotman_get_lots_past_exp(true, &lots, &err);
+		rv = lotman_get_lots_past_exp(true, false, &lots, &err);
 		break;
 	default:
 		m_log.Emsg(
@@ -270,6 +274,35 @@ void XrdPurgeLotMan::completePurgePolicyBase(const DataFsPurgeshot &purgeShot,
 			globalBRemaining -= toRecoverFromDir;
 			m_purge_dirs[dir]->dir_b_remaining -= toRecoverFromDir;
 		}
+
+		// Once a complete-purge policy (PastDel or PastExp) has scheduled
+		// drains for every directory of `lotName`, record a reclamation
+		// ledger row so subsequent purge ticks skip this lot. The
+		// reclamation is an absolute fact: lotman doesn't itself delete
+		// the lot row, only marks it as no-longer-attributed-to.
+		// We do NOT call reclaim for partial-purge policies (PastOpp /
+		// PastDed) since they're over-quota cleanups, not severance of
+		// the accounting link.
+		const auto reclaimed_at_ms =
+			std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::system_clock::now().time_since_epoch())
+				.count();
+		const std::string reason = (policy == XrdPfc::PurgePolicy::PastDel)
+									   ? "del"
+									   : "exp";
+		char *reclaimErr = nullptr;
+		int rrv = lotman_reclaim_lot(lotName.c_str(),
+									 static_cast<int64_t>(reclaimed_at_ms),
+									 reason.c_str(), &reclaimErr);
+		if (rrv == LOTMAN_RECLAIM_ERROR) {
+			m_log.Emsg("XrdPurgeLotMan", "completePurgePolicyBase",
+					   ("Error reclaiming lot " + lotName + ": " +
+						std::string(reclaimErr ? reclaimErr : "unknown"))
+						   .c_str());
+		}
+		if (reclaimErr) {
+			free(reclaimErr);
+		}
 	}
 
 	return;
@@ -287,10 +320,13 @@ void XrdPurgeLotMan::partialPurgePolicyBase(const DataFsPurgeshot &purgeShot,
 	int rv{-1};
 	switch (policy) {
 	case XrdPfc::PurgePolicy::PastOpp:
-		rv = lotman_get_lots_past_opp(true, true, &lots, &err);
+		// include_reclaimed=false: skip lots already reclaimed in the
+		// ledger. Hierarchical=true depth-orders results (deepest first)
+		// and lets lotman aggregate child overage into a parent's usage.
+		rv = lotman_get_lots_past_opp(true, true, false, &lots, true, &err);
 		break;
 	case XrdPfc::PurgePolicy::PastDed:
-		rv = lotman_get_lots_past_ded(true, true, &lots, &err);
+		rv = lotman_get_lots_past_ded(true, true, false, &lots, true, &err);
 		break;
 	default:
 		m_log.Emsg(
@@ -416,8 +452,16 @@ long long XrdPurgeLotMan::GetBytesToRecover(const DataFsPurgeshot &purge_shot) {
 	}
 	auto lotUpdateJson = reconstructPathsAndBuildJson(purge_shot, m_log);
 
+	// delta_mode=false → write absolute usage values (the purge_shot
+	// snapshot is the authoritative on-disk state). query_time=now lets
+	// lotman attribute the bytes via longest-prefix path lookup against
+	// whichever lot owns each directory at this instant — naturally
+	// self-healing across UUID lot succession.
+	const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+							std::chrono::system_clock::now().time_since_epoch())
+							.count();
 	rv = lotman_update_lot_usage_by_dir(lotUpdateJson.dump().c_str(), false,
-										&err);
+										static_cast<int64_t>(now_ms), &err);
 	if (rv != 0) {
 		m_log.Emsg("XrdPurgeLotMan", "GetBytesToRecover",
 				   "Error updating lot usage by dir:", err);
@@ -630,6 +674,19 @@ bool XrdPurgeLotMan::ConfigPurgePin(const char *params) {
 		m_log.Emsg("XrdPurgeLotMan", "ConfigPurgePin",
 				   ("Error setting lot home to '" + getLotHome() +
 					"': " + std::string(err))
+					   .c_str());
+		return false;
+	}
+
+	// The plugin is invoked by xrootd which runs as root locally. Lotman
+	// needs an authorised caller for any mutating call (reclaim, update,
+	// remove). "root" is the rootly identity that owns every lot in this
+	// cache's database, so it satisfies authorisation for the reclaim
+	// cascade and any usage updates we issue.
+	rv = lotman_set_context_str("caller", "root", &err);
+	if (rv != 0) {
+		m_log.Emsg("XrdPurgeLotMan", "ConfigPurgePin",
+				   ("Error setting caller context to root: " + std::string(err))
 					   .c_str());
 		return false;
 	}
