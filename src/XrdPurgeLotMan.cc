@@ -202,16 +202,20 @@ void XrdPurgeLotMan::completePurgePolicyBase(const DataFsPurgeshot &purgeShot,
 	char **lots;
 	char *err;
 	int rv{-1};
+	const int64_t now_ms =
+		std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::system_clock::now().time_since_epoch())
+			.count();
 
 	switch (policy) {
 	case XrdPfc::PurgePolicy::PastDel:
 		// include_reclaimed=false: do not redrain lots already marked
 		// reclaimed in the lotman ledger. Cleanup loops always pass false
 		// so already-handled lots are skipped on subsequent ticks.
-		rv = lotman_get_lots_past_del(true, false, &lots, &err);
+		rv = lotman_get_lots_past_del(now_ms, true, false, &lots, &err);
 		break;
 	case XrdPfc::PurgePolicy::PastExp:
-		rv = lotman_get_lots_past_exp(true, false, &lots, &err);
+		rv = lotman_get_lots_past_exp(now_ms, true, false, &lots, &err);
 		break;
 	default:
 		m_log.Emsg(

@@ -502,7 +502,9 @@ TEST_F(LMSetupTeardown, ReclaimLotIsIdempotentAndFiltersFromGetLotsPastExp) {
 	// Pre-condition: lot is visible in get_lots_past_exp.
 	{
 		char **lots = nullptr;
-		ASSERT_EQ(lotman_get_lots_past_exp(true, false, &lots, &err), 0)
+		ASSERT_EQ(lotman_get_lots_past_exp(static_cast<int64_t>(nowMs), true,
+										   false, &lots, &err),
+				  0)
 			<< (err ? err : "(null)");
 		bool found = false;
 		for (int i = 0; lots && lots[i]; ++i) {
@@ -533,7 +535,9 @@ TEST_F(LMSetupTeardown, ReclaimLotIsIdempotentAndFiltersFromGetLotsPastExp) {
 	// still shows it (forensics window).
 	{
 		char **lots = nullptr;
-		ASSERT_EQ(lotman_get_lots_past_exp(true, false, &lots, &err), 0)
+		ASSERT_EQ(lotman_get_lots_past_exp(static_cast<int64_t>(nowMs + 1000),
+										   true, false, &lots, &err),
+				  0)
 			<< (err ? err : "(null)");
 		for (int i = 0; lots && lots[i]; ++i) {
 			EXPECT_STRNE(lots[i], "reclaim-test")
@@ -543,7 +547,9 @@ TEST_F(LMSetupTeardown, ReclaimLotIsIdempotentAndFiltersFromGetLotsPastExp) {
 	}
 	{
 		char **lots = nullptr;
-		ASSERT_EQ(lotman_get_lots_past_exp(true, true, &lots, &err), 0)
+		ASSERT_EQ(lotman_get_lots_past_exp(static_cast<int64_t>(nowMs + 1000),
+										   true, true, &lots, &err),
+				  0)
 			<< (err ? err : "(null)");
 		bool found = false;
 		for (int i = 0; lots && lots[i]; ++i) {
