@@ -71,6 +71,38 @@ struct XrdPurgeLotMan::LotDeleter {
 	void operator()(char **ptr) { lotman_free_string_list(ptr); }
 };
 
+// See header for behaviour contract. Implementation pulls the recursive
+// owners of `root` and installs the first one as the caller. The "first"
+// choice is arbitrary but stable: lotman returns owners in insertion
+// order, and any owner of any ancestor of any lot satisfies authorisation,
+// so picking [0] is correct as long as it is non-empty.
+bool XrdPurgeLotMan::refreshCallerFromRoot() {
+	char *getErr = nullptr;
+	char **owners = nullptr;
+	int rv = lotman_get_owners("root", true, &owners, &getErr);
+	std::unique_ptr<char, decltype(&free)> getErrOwner(getErr, free);
+	std::unique_ptr<char *, LotDeleter> ownersOwner(owners);
+
+	if (rv != 0 || !owners || !owners[0]) {
+		// Root lot doesn't exist yet, or it has no owner recorded — soft
+		// failure; caller is responsible for retrying.
+		return false;
+	}
+
+	const std::string callerId = owners[0];
+	char *setErr = nullptr;
+	int srv = lotman_set_context_str("caller", callerId.c_str(), &setErr);
+	std::unique_ptr<char, decltype(&free)> setErrOwner(setErr, free);
+	if (srv != 0) {
+		m_log.Emsg("XrdPurgeLotMan", "refreshCallerFromRoot",
+				   ("Error setting caller context to '" + callerId +
+					"': " + std::string(setErr ? setErr : "unknown"))
+					   .c_str());
+		return false;
+	}
+	return true;
+}
+
 // Gets all the root lots and tallies up their usage. Used to construct the
 // total number of bytes to clear on each purge loop by comparing with
 // configured HWM/LWM.
@@ -149,8 +181,29 @@ XrdPurgeLotMan::lotPerDirUsageB(const std::string &lot,
 		// Get the usage for the directory
 		const DirUsage *dirUsage = purge_shot.find_dir_usage_for_dir_path(path);
 		if (dirUsage == nullptr) {
+			// find_dir_usage_for_dir_path is a tree walk over xrootd's
+			// per-directory state vector (DataFsPurgeshot::m_dir_vec). A
+			// null return means the directory has no node in the cache's
+			// DirState tree at the time of the snapshot. That is *not* a
+			// lotman error (lotman_get_lot_dirs above succeeded with no
+			// error string to propagate); it is the expected steady-state
+			// condition when (a) the lot owns a path that has not had any
+			// files cached yet, or (b) the directory was just pruned by an
+			// earlier purge tick and its DirState node has not been
+			// re-created. In both cases there are zero bytes recoverable
+			// from this path, which is exactly what skipping it gives us,
+			// so we omit the entry from usageMap and continue. Log at
+			// Emsg-info level with enough context (lot name + path) for an
+			// operator to correlate against the lot db if needed; the
+			// previous "Error" wording produced needless noise on every
+			// purge tick for any quiet lot.
 			m_log.Emsg("XrdPurgeLotMan", "lotPerDirUsageB",
-					   ("Error finding usage for directory " + path).c_str());
+					   ("Skipping path '" + path + "' for lot '" + lot +
+						"': no DirState node in current purge snapshot "
+						"(no cached files under this path yet, or it was "
+						"just pruned). This is benign; zero bytes "
+						"recoverable.")
+						   .c_str());
 			continue;
 		}
 		long long bytesToRecover =
@@ -446,6 +499,16 @@ long long XrdPurgeLotMan::GetBytesToRecover(const DataFsPurgeshot &purge_shot) {
 	m_list.clear();
 	m_purge_dirs.clear();
 
+	// Re-install the caller context from the current owners of `root` in
+	// case (a) ConfigPurgePin ran before the lot db was populated or (b)
+	// some other component has reset the global caller context in between
+	// ticks. Soft-failure: if root still doesn't exist we keep whatever
+	// caller is currently configured and continue — read-only operations
+	// (GetTotalUsageB, GetLotsPastExp, etc.) don't require authorisation,
+	// so we can still compute work, only the eventual reclaim/update calls
+	// would fail and log.
+	(void)refreshCallerFromRoot();
+
 	char *err;
 	char *output;
 	auto rv = lotman_get_context_str("lot_home", &output, &err);
@@ -682,17 +745,23 @@ bool XrdPurgeLotMan::ConfigPurgePin(const char *params) {
 		return false;
 	}
 
-	// The plugin is invoked by xrootd which runs as root locally. Lotman
-	// needs an authorised caller for any mutating call (reclaim, update,
-	// remove). "root" is the rootly identity that owns every lot in this
-	// cache's database, so it satisfies authorisation for the reclaim
-	// cascade and any usage updates we issue.
-	rv = lotman_set_context_str("caller", "root", &err);
-	if (rv != 0) {
+	// Install an authorised caller context by reading the recursive owners
+	// of the `root` lot. This is the identity that bootstrapped the cache's
+	// lot database (typically the federation's director URL) and, because
+	// lotman's authorisation walks the recursive parent chain, having root's
+	// owner as caller authorises every reclaim/update/remove against any
+	// descendant lot.
+	//
+	// On a fresh cache the `root` lot may not exist yet at plugin-init time.
+	// We don't treat that as a fatal configuration error here — instead
+	// GetBytesToRecover retries on every purge tick, so once the director
+	// has populated the database the very next tick will install the right
+	// caller. We only log the deferral.
+	if (!refreshCallerFromRoot()) {
 		m_log.Emsg("XrdPurgeLotMan", "ConfigPurgePin",
-				   ("Error setting caller context to root: " + std::string(err))
-					   .c_str());
-		return false;
+				   "Could not install caller context from root lot owner at "
+				   "startup (root lot may not exist yet); will retry on the "
+				   "next purge tick.");
 	}
 
 	return true;

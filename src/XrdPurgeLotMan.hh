@@ -127,6 +127,21 @@ class XrdPurgeLotMan : public PurgePin {
 	long long getTotalUsageB();
 	std::map<std::string, long long>
 	lotPerDirUsageB(const std::string &lot, const DataFsPurgeshot &purge_shot);
+
+	// Discover an authorised caller string by reading the recursive owners
+	// of the `root` lot and installing the first one in lotman's caller
+	// context. lotman authorises mutations (reclaim, update, remove) by
+	// walking each lot's recursive parent chain and accepting the call if
+	// the caller matches any ancestor's owner. Since every lot eventually
+	// descends from `root`, matching root's owner authorises us against
+	// the whole tree.
+	//
+	// Returns true when a caller was successfully installed. Returns false
+	// (without modifying caller context) when the `root` lot doesn't yet
+	// exist in the database — typical on a freshly-bootstrapped cache
+	// before any lot has been added — so callers can retry on a later
+	// purge tick.
+	bool refreshCallerFromRoot();
 };
 
 } // namespace XrdPfc

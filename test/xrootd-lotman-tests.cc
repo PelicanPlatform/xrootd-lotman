@@ -86,6 +86,16 @@ class XrdPurgeLotManTest : public XrdPfc::XrdPurgeLotMan {
 
 	long long testGetTotalUsageB() { return getTotalUsageB(); }
 	LotManConfiguration testGetLotmanConf() { return m_lotman_conf; }
+	// Forwarder so tests can exercise the protected lotPerDirUsageB
+	// directly. Returning a map (rather than just a status) lets the test
+	// assert both that the call completes and that missing-DirState paths
+	// are silently omitted, while paths that do have entries land in the
+	// map with the expected byte counts.
+	std::map<std::string, long long>
+	testLotPerDirUsageB(const std::string &lot,
+						const XrdPfc::DataFsPurgeshot &purge_shot) {
+		return lotPerDirUsageB(lot, purge_shot);
+	}
 	std::string GetLogLevelString() const {
 		return LogMaskToString(m_log.getMsgMask());
 	}
@@ -435,10 +445,12 @@ namespace XrdPfc;
 }
 */
 
-// Verifies that ConfigPurgePin sets the "caller" context to "root" so that
-// authorisation-gated lotman APIs (reclaim_lot, update_lot_usage_by_dir,
-// remove_lot) succeed when invoked by the purge plugin running under xrootd.
-TEST_F(LMSetupTeardown, ConfigPurgePinSetsRootCallerContext) {
+// Verifies that ConfigPurgePin installs an authorised caller context by
+// reading the recursive owners of the `root` lot. The fix replaces an
+// earlier behaviour that hard-coded caller="root" — a literal string that
+// matches no real owner once lots are created by services like Pelican's
+// origins/director that record owners as URLs.
+TEST_F(LMSetupTeardown, ConfigPurgePinInstallsRootOwnerAsCaller) {
 	using namespace XrdPfc;
 
 	// Stash the existing caller context so this test doesn't bleed state into
@@ -447,6 +459,25 @@ TEST_F(LMSetupTeardown, ConfigPurgePinSetsRootCallerContext) {
 	char *err = nullptr;
 	(void)lotman_get_context_str("caller", &prevCaller, &err);
 	std::unique_ptr<char, decltype(&free)> prevCallerOwner(prevCaller, free);
+
+	// Bootstrap the `root` lot owned by a URL-shaped identity, mirroring how
+	// Pelican's director registers itself.
+	const std::string directorUrl = "https://director.example.org:8443";
+	auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+					 std::chrono::system_clock::now().time_since_epoch())
+					 .count();
+	{
+		// Need to be acting as the URL owner to add a lot whose owner is
+		// the URL — addLot validates caller==owner during creation.
+		(void)lotman_set_context_str("caller", directorUrl.c_str(), &err);
+		json rootJSON = createLotJSON(
+			"root", directorUrl, "/", false, 1.0, 1.0, nowMs - 1000,
+			nowMs + (365LL * 24 * 3600 * 1000),
+			nowMs + (2LL * 365 * 24 * 3600 * 1000));
+		// Ignore failure if `root` already exists from a previous test run
+		// inside this suite — the assertion below is what matters.
+		(void)lotman_add_lot(rootJSON.dump().c_str(), &err);
+	}
 
 	std::string lotHome = LMSetupTeardown::tmp_dir;
 	std::string configParams = lotHome;
@@ -458,11 +489,110 @@ TEST_F(LMSetupTeardown, ConfigPurgePinSetsRootCallerContext) {
 	std::unique_ptr<char, decltype(&free)> callerOwner(caller, free);
 	ASSERT_EQ(rv, 0) << (err ? err : "(null)");
 	ASSERT_NE(caller, nullptr);
-	EXPECT_STREQ(caller, "root");
+	EXPECT_STREQ(caller, directorUrl.c_str())
+		<< "ConfigPurgePin must install the recursive owner of the `root` "
+		   "lot as the caller, not the literal string \"root\"";
 
 	// Restore previous caller for downstream tests. lotman context is
-	// process-global so leaking caller="root" would break later tests that
-	// expect to act as the lot owner.
+	// process-global so leaking the director URL would break later tests
+	// that expect to act as a different identity.
+	const char *toRestore = prevCaller ? prevCaller : "owner1";
+	(void)lotman_set_context_str("caller", toRestore, &err);
+}
+
+// End-to-end regression for the production crash where the cache plugin
+// could not reclaim lots created by origins because caller="root" (a literal
+// string) did not match any owner. After the fix the caller is `root` lot's
+// owner, which authorises mutations on every descendant via the recursive
+// parent-chain check inside lotman.
+TEST_F(LMSetupTeardown, ConfigPurgePinAuthorizesReclaimOfDifferentlyOwnedLot) {
+	using namespace XrdPfc;
+
+	char *prevCaller = nullptr;
+	char *err = nullptr;
+	(void)lotman_get_context_str("caller", &prevCaller, &err);
+	std::unique_ptr<char, decltype(&free)> prevCallerOwner(prevCaller, free);
+
+	auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+					 std::chrono::system_clock::now().time_since_epoch())
+					 .count();
+	const std::string directorUrl = "https://director.example.org:8443";
+	const std::string originUrl = "https://origin.example.org:8440";
+	const std::string childLotName = "origin-owned-child";
+
+	// 0. lotman requires a `default` lot to exist before any other can be
+	//    added. Other tests in this suite (e.g. GetTotalUsageBTest) create
+	//    it as part of their own setup, but we make this test self-sufficient
+	//    so the suite's filter ordering can't mask the regression. Both the
+	//    add and the chosen caller below are no-ops when default already
+	//    exists.
+	(void)lotman_set_context_str("caller", "owner2", &err);
+	json defaultJSON = createLotJSON(
+		"default", "owner2", "/default", true, 1.0, 1.0, nowMs - 1000,
+		nowMs + (365LL * 24 * 3600 * 1000),
+		nowMs + (2LL * 365 * 24 * 3600 * 1000));
+	(void)lotman_add_lot(defaultJSON.dump().c_str(), &err);
+
+	// 1. Director bootstraps the root lot.
+	(void)lotman_set_context_str("caller", directorUrl.c_str(), &err);
+	json rootJSON =
+		createLotJSON("root", directorUrl, "/", false, 1.0, 1.0,
+					  nowMs - 1000, nowMs + (365LL * 24 * 3600 * 1000),
+					  nowMs + (2LL * 365 * 24 * 3600 * 1000));
+	(void)lotman_add_lot(rootJSON.dump().c_str(), &err);
+
+	// 2. Director creates an origin-owned child lot under root. lotman's
+	//    add_lot authorisation checks caller against the *parent* lot's
+	//    owners (not against the new lot's own owner field), so the
+	//    director — who owns root — is allowed to register a child whose
+	//    recorded owner is a different identity. This mirrors how Pelican's
+	//    director provisions per-origin lots on behalf of origins.
+	json childJSON = {{"lot_name", childLotName},
+					  {"owner", originUrl},
+					  {"parents", {"root"}},
+					  {"paths",
+					   {{{"path", "/origin-owned-child"},
+						 {"recursive", true}}}},
+					  {"management_policy_attrs",
+					   {{"dedicated_GB", 0.001},
+						{"opportunistic_GB", 0.001},
+						{"max_num_objects", 100},
+						{"creation_time", nowMs - (3600LL * 1000)},
+						{"expiration_time", nowMs - (60LL * 1000)},
+						{"deletion_time", nowMs + (3600LL * 1000)}}}};
+	ASSERT_EQ(lotman_add_lot(childJSON.dump().c_str(), &err), 0)
+		<< (err ? err : "(null)");
+
+	// 3. Simulate the cache being a wholly separate process by wiping the
+	//    caller context: we must not leak the director identity that
+	//    happened to be installed for setup. The post-fix ConfigPurgePin is
+	//    the only thing allowed to re-install caller below.
+	(void)lotman_set_context_str("caller", "owner1", &err);
+
+	// 3. Cache plugin installs its caller context via ConfigPurgePin.
+	std::string lotHome = LMSetupTeardown::tmp_dir;
+	XrdPurgeLotManTest testPurgePin{"trace-log-level.cfg"};
+	ASSERT_TRUE(testPurgePin.ConfigPurgePin(lotHome.c_str()));
+
+	// 4. Cache reclaims the origin-owned child lot. Before the fix this
+	//    returned LOTMAN_RECLAIM_ERROR with "Caller does not have proper
+	//    ownership". After the fix, caller is the director URL (root's
+	//    owner) which authorises the cascade because root is in every
+	//    descendant's recursive parent chain.
+	int rv = lotman_reclaim_lot(childLotName.c_str(),
+								static_cast<int64_t>(nowMs), "exp", &err);
+	EXPECT_EQ(rv, LOTMAN_RECLAIM_OK)
+		<< "Reclaim of " << childLotName
+		<< " must succeed when caller is root lot's owner. err: "
+		<< (err ? err : "(null)");
+
+	// Cleanup so the suite-shared db doesn't trip later tests. Removal,
+	// like reclaim, runs against the parent-chain check — act as the
+	// director here so we're authorised against `root`.
+	(void)lotman_set_context_str("caller", directorUrl.c_str(), &err);
+	(void)lotman_remove_lot(childLotName.c_str(), true, true, false, false,
+							&err);
+
 	const char *toRestore = prevCaller ? prevCaller : "owner1";
 	(void)lotman_set_context_str("caller", toRestore, &err);
 }
@@ -566,6 +696,93 @@ TEST_F(LMSetupTeardown, ReclaimLotIsIdempotentAndFiltersFromGetLotsPastExp) {
 	// Cleanup — remove_lot lets later tests re-use a clean slate even though
 	// SetUpTestSuite already tore the dir.
 	(void)lotman_remove_lot("reclaim-test", true, true, false, false, &err);
+}
+
+// Regression test for the spurious "Error finding usage for directory" log
+// noise emitted on every purge tick. The underlying condition is benign:
+// lotman knows about a path because a lot owns it, but xrootd's per-directory
+// state vector has no node for the path because no files have been cached
+// there yet (or the directory was just pruned). lotPerDirUsageB must:
+//   1. Not abort or throw — just skip the path.
+//   2. Not include the missing path in the returned usage map (zero bytes
+//      recoverable would be misleading).
+//   3. Still include any paths that DO have DirState entries, with their
+//      correct byte counts derived from m_StBlocks * 512.
+TEST_F(LMSetupTeardown,
+	   LotPerDirUsageSkipsPathsWithNoDirStateNodeAndKeepsKnownOnes) {
+	char *err = nullptr;
+	ASSERT_EQ(lotman_set_context_str("caller", "owner1", &err), 0)
+		<< (err ? err : "(null)");
+
+	auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+					 std::chrono::system_clock::now().time_since_epoch())
+					 .count();
+
+	// lotman requires the "default" lot to exist before any other lot can
+	// be created. The fixture is per-suite (SetUpTestSuite, not SetUp), so
+	// a prior test in this suite may have already created it; tolerate
+	// either case rather than failing on a benign "lot exists" return.
+	json defaultJSON = createLotJSON(
+		"default", "owner1", "/default", true, 1.0, 1.0, nowMs,
+		nowMs + (3600LL * 1000), nowMs + (7200LL * 1000));
+	(void)lotman_add_lot(defaultJSON.dump().c_str(), &err);
+	if (err) {
+		free(err);
+		err = nullptr;
+	}
+
+	// Lot owns two paths: /known and /unknown. We will populate purge_shot
+	// with a DirState node for /known only.
+	const std::string lotName = "per-dir-usage-test";
+	json lotJSON = {
+		{"lot_name", lotName},
+		{"owner", "owner1"},
+		{"parents", {lotName}},
+		{"paths",
+		 {{{"path", "/known"}, {"recursive", true}},
+		  {{"path", "/unknown"}, {"recursive", true}}}},
+		{"management_policy_attrs",
+		 {{"dedicated_GB", 1.0},
+		  {"opportunistic_GB", 1.0},
+		  {"max_num_objects", 100},
+		  {"creation_time", nowMs - 1000},
+		  {"expiration_time", nowMs + (3600LL * 1000)},
+		  {"deletion_time", nowMs + (7200LL * 1000)}}}};
+	ASSERT_EQ(lotman_add_lot(lotJSON.dump().c_str(), &err), 0)
+		<< (err ? err : "(null)");
+
+	// Build a purge_shot tree containing only the root and /known. The
+	// `/unknown` directory is intentionally absent — that's the bug
+	// trigger.
+	XrdPfc::DataFsPurgeshot purge_shot;
+	XrdPfc::DirPurgeElement rootElement, knownElement;
+	populatePurgeElement(rootElement, "", -1, 1, 2);
+	populatePurgeElement(knownElement, "known", 0, 0, 0);
+	// 1 GiB of usage on /known (in 512-byte blocks).
+	const long long knownStBlocks = (1LL << 30) / 512;
+	knownElement.m_usage.m_StBlocks = knownStBlocks;
+	purge_shot.m_dir_vec.push_back(rootElement);
+	purge_shot.m_dir_vec.push_back(knownElement);
+
+	XrdPurgeLotManTest testPurgePin;
+	auto usage = testPurgePin.testLotPerDirUsageB(lotName, purge_shot);
+
+	// lotman_get_lot_dirs returns paths with a trailing slash (e.g.
+	// "/known/"), and lotPerDirUsageB uses that string verbatim as the
+	// map key. /known landed in the map with the expected byte count.
+	auto knownIt = usage.find("/known/");
+	ASSERT_NE(knownIt, usage.end())
+		<< "/known/ has a DirState node and must appear in the usage map";
+	EXPECT_EQ(knownIt->second, knownStBlocks * 512);
+
+	// /unknown was silently skipped: not in the map, no exception.
+	EXPECT_EQ(usage.find("/unknown/"), usage.end())
+		<< "/unknown/ has no DirState node; lotPerDirUsageB must omit it "
+		   "(otherwise we'd attribute fabricated zero bytes to a "
+		   "non-existent directory)";
+
+	// Cleanup
+	(void)lotman_remove_lot(lotName.c_str(), true, true, false, false, &err);
 }
 
 // Main test runner
