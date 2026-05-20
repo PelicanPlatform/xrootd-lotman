@@ -1,5 +1,5 @@
 Name:           xrootd-lotman
-Version:        0.0.5
+Version:        0.1.0
 Release:        1%{?dist}
 Summary:        A purge plugin for XRootD that uses Lotman's tracking for informed cache disk management
 
@@ -10,7 +10,10 @@ Source0:        https://github.com/PelicanPlatform/xrootd-lotman/archive/v%{vers
 BuildRequires:  cmake
 BuildRequires:  gcc-c++
 BuildRequires:  make
-BuildRequires:  lotman
+BuildRequires:  lotman >= 0.1.0
+BuildRequires:  lotman < 0.2.0
+Requires:       lotman >= 0.1.0
+Requires:       lotman < 0.2.0
 BuildRequires:  nlohmann-json-devel
 BuildRequires:  xrootd-server-devel >= 1:5.8
 
@@ -36,6 +39,9 @@ This package provides a purge plugin for XRootD that uses Lotman's tracking for 
 %{_includedir}/XrdPurgeLotManUtils.hh
 
 %changelog
+* Wed May 20 2026 Justin Hiemstra <jhiemstra@wisc.edu> - 0.1.0-1
+- Bump version to reflect breaking API/ABI changes from lotman v0.1.0
+
 * Mon Jul 14 2025 Justin Hiemstra <jhiemstra@wisc.edu> - 0.0.5-1
 - Fix broken RPM (forgot to package new header files)
 
